@@ -5,6 +5,8 @@
 #   ./bundle.sh universal       release build for Apple silicon + Intel (lipo)
 # Signing is optional: set DUSTY_SIGN_IDENTITY (e.g. "Developer ID Application: Name (TEAMID)")
 # to sign with the hardened runtime; otherwise the app is ad-hoc signed for local use.
+# Automatic updates: run scripts/fetch-sparkle.sh once so Sparkle.framework gets embedded.
+# Without it the app still builds, just with updates off (DUSTY_REQUIRE_SPARKLE=1 makes that an error).
 set -e
 cd "$(dirname "$0")"
 MODE="${1:-release}"
@@ -50,12 +52,37 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>SUFeedURL</key><string>https://deuspheara.github.io/dusty/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>1AyPHjqtQ3vMWduIHwzPS8q/Ek3N9eCuDjldAy53cgI=</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUScheduledCheckInterval</key><integer>86400</integer>
 </dict></plist>
 PLIST
 
-if [ -n "$DUSTY_SIGN_IDENTITY" ]; then
-  codesign --force --options runtime --timestamp --sign "$DUSTY_SIGN_IDENTITY" "$APP"
+# Sparkle (automatic updates). Dusty isn't sandboxed, so Sparkle's XPC services aren't needed.
+SPARKLE=""
+if [ -d vendor/Sparkle.framework ]; then
+  mkdir -p "$APP/Contents/Frameworks"
+  ditto vendor/Sparkle.framework "$APP/Contents/Frameworks/Sparkle.framework"
+  SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+  rm -rf "$SPARKLE/Versions/B/XPCServices" "$SPARKLE/XPCServices"
+elif [ "${DUSTY_REQUIRE_SPARKLE:-0}" = "1" ]; then
+  echo "Sparkle.framework missing: run scripts/fetch-sparkle.sh" >&2
+  exit 1
 else
-  codesign --force --sign - "$APP"
+  echo "note: no app/vendor/Sparkle.framework, building without automatic updates" >&2
 fi
+
+# sign inside-out: Sparkle's helpers, the framework, then the app
+if [ -n "$DUSTY_SIGN_IDENTITY" ]; then
+  sign() { codesign --force --options runtime --timestamp --sign "$DUSTY_SIGN_IDENTITY" "$@"; }
+else
+  sign() { codesign --force --sign - "$@"; }
+fi
+if [ -n "$SPARKLE" ]; then
+  sign "$SPARKLE/Versions/B/Autoupdate"
+  sign "$SPARKLE/Versions/B/Updater.app"
+  sign "$SPARKLE"
+fi
+sign "$APP"
 echo "Built $APP ($VERSION, $MODE)"

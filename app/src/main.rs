@@ -5,12 +5,13 @@ mod dusty;
 mod engine;
 mod platform;
 mod ui;
+mod updater;
 
 use std::borrow::Cow;
 
 use gpui::*;
 
-actions!(dusty, [Quit, IconPurple, IconMint, IconCream]);
+actions!(dusty, [Quit, CheckForUpdates, ToggleBetaUpdates, IconPurple, IconMint, IconCream]);
 
 /// The Dusty menu, with the current icon color ticked.
 fn menus(current: platform::IconVariant) -> Vec<Menu> {
@@ -22,14 +23,19 @@ fn menus(current: platform::IconVariant) -> Vec<Menu> {
             platform::IconVariant::Cream => MenuItem::action(name, IconCream),
         }
     };
-    vec![Menu {
-        name: "Dusty".into(),
-        items: vec![
-            MenuItem::submenu(Menu { name: "App Icon".into(), items: platform::IconVariant::ALL.into_iter().map(item).collect() }),
-            MenuItem::separator(),
-            MenuItem::action("Quit Dusty", Quit),
-        ],
-    }]
+    let mut items = Vec::new();
+    if updater::available() {
+        items.push(MenuItem::action("Check for Updates…", CheckForUpdates));
+        let beta = if updater::beta_enabled() { "✓ Get Beta Updates" } else { "    Get Beta Updates" };
+        items.push(MenuItem::action(beta, ToggleBetaUpdates));
+        items.push(MenuItem::separator());
+    }
+    items.extend([
+        MenuItem::submenu(Menu { name: "App Icon".into(), items: platform::IconVariant::ALL.into_iter().map(item).collect() }),
+        MenuItem::separator(),
+        MenuItem::action("Quit Dusty", Quit),
+    ]);
+    vec![Menu { name: "Dusty".into(), items }]
 }
 
 fn set_icon(v: platform::IconVariant, cx: &mut App) {
@@ -142,6 +148,12 @@ fn main() {
         }
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("cmd-w", Quit, None)]);
         cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &CheckForUpdates, _| updater::check_now());
+        cx.on_action(|_: &ToggleBetaUpdates, cx| {
+            updater::set_beta(!updater::beta_enabled());
+            cx.set_menus(menus(platform::saved_icon()));
+        });
+        updater::start();
         cx.on_action(|_: &IconPurple, cx| set_icon(platform::IconVariant::Purple, cx));
         cx.on_action(|_: &IconMint, cx| set_icon(platform::IconVariant::Mint, cx));
         cx.on_action(|_: &IconCream, cx| set_icon(platform::IconVariant::Cream, cx));
