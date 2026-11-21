@@ -306,7 +306,7 @@ const DEFAULT_ROOTS = [
 const program = new Command()
   .name("dusty")
   .description("Reclaim disk space on macOS: build artifacts, dev caches, Xcode, Android, Docker.")
-  .version("0.1.0")
+  .version("0.1.0-beta.1")
   .option("-r, --roots <dirs...>", "folders to scan for project build artifacts", DEFAULT_ROOTS)
   .option("-n, --dry-run", "show what would be deleted without deleting", false)
   .option("-y, --yes", "no prompts: clean everything selected by default", false)
