@@ -82,7 +82,7 @@ jobs:
           ditto -c -k --keepParent app/target/Dusty.app "Dusty-$VERSION.zip"
           shasum -a 256 "Dusty-$VERSION.dmg" "Dusty-$VERSION.zip" > SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG }}
           name: Dusty ${{ env.VERSION }}
