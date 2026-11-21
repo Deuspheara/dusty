@@ -1,0 +1,319 @@
+# Build outputs and downloaded dependencies inside your projects.
+#
+# A folder is offered only when its parent folder holds one of the `markers` (a file name, or `*.ext`
+# for any file with that extension). Inside a git repo it must also be git-ignored: a tracked `build/`
+# is source code. First match wins, so put the more specific rule first.
+#
+#   dir        the folder name (or `prefix` for names that start with it, like cmake-build-debug)
+#   markers    files the parent must contain; "@name" pulls in a list from [markers] below;
+#              empty only for names no tool uses for source
+#   kind       what the app and the CLI call it
+#   redownload true when getting it back costs a download (off by default, its own group)
+
+[markers]
+gradle = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradlew"]
+js = ["package.json"]
+py = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "tox.ini", "noxfile.py"]
+nuxt = ["nuxt.config.ts", "nuxt.config.js", "nuxt.config.mjs"]
+dotnet = ["*.csproj", "*.fsproj", "*.vbproj"]
+
+[[rule]]
+dir = "build"
+markers = ["pubspec.yaml"]
+kind = "Flutter build"
+
+[[rule]]
+dir = ".dart_tool"
+markers = ["pubspec.yaml"]
+kind = "Dart tool cache"
+
+[[rule]]
+dir = "ephemeral"
+markers = ["generated_plugin_registrant.cc", "generated_plugins.cmake", "CMakeLists.txt", "Podfile"]
+kind = "Flutter ephemeral"
+
+[[rule]]
+dir = "build"
+markers = ["@gradle"]
+kind = "Gradle build"
+
+[[rule]]
+dir = ".gradle"
+markers = ["@gradle"]
+kind = "Gradle project cache"
+
+[[rule]]
+dir = ".cxx"
+markers = ["@gradle"]
+kind = "Android NDK build"
+
+[[rule]]
+dir = ".externalNativeBuild"
+markers = ["@gradle"]
+kind = "Android NDK build"
+
+[[rule]]
+dir = ".kotlin"
+markers = ["@gradle"]
+kind = "Kotlin cache"
+
+[[rule]]
+dir = "target"
+markers = ["Cargo.toml", "pom.xml"]
+kind = "Rust/Maven target"
+
+[[rule]]
+dir = "target"
+markers = ["build.sbt"]
+kind = "Scala target"
+
+[[rule]]
+dir = ".bloop"
+markers = ["build.sbt"]
+kind = "Scala Bloop cache"
+
+[[rule]]
+dir = ".metals"
+markers = ["build.sbt"]
+kind = "Scala Metals cache"
+
+[[rule]]
+dir = ".build"
+markers = ["Package.swift"]
+kind = "SwiftPM build"
+
+[[rule]]
+dir = "DerivedData"
+markers = []
+kind = "Xcode DerivedData"
+
+[[rule]]
+dir = "build"
+markers = ["CMakeLists.txt", "meson.build"]
+kind = "CMake build"
+
+[[rule]]
+prefix = "cmake-build-"
+markers = ["CMakeLists.txt"]
+kind = "CLion build"
+
+[[rule]]
+dir = ".pio"
+markers = ["platformio.ini"]
+kind = "PlatformIO build"
+
+[[rule]]
+dir = ".zig-cache"
+markers = ["build.zig"]
+kind = "Zig cache"
+
+[[rule]]
+dir = "zig-cache"
+markers = ["build.zig"]
+kind = "Zig cache"
+
+[[rule]]
+dir = "zig-out"
+markers = ["build.zig"]
+kind = "Zig output"
+
+[[rule]]
+dir = "bin"
+markers = ["@dotnet"]
+kind = ".NET build"
+
+[[rule]]
+dir = "obj"
+markers = ["@dotnet"]
+kind = ".NET build"
+
+[[rule]]
+dir = "_build"
+markers = ["mix.exs"]
+kind = "Elixir build"
+
+[[rule]]
+dir = ".elixir_ls"
+markers = ["mix.exs"]
+kind = "ElixirLS cache"
+
+[[rule]]
+dir = ".stack-work"
+markers = ["stack.yaml"]
+kind = "Haskell Stack build"
+
+[[rule]]
+dir = "dist-newstyle"
+markers = ["cabal.project", "*.cabal"]
+kind = "Haskell Cabal build"
+
+[[rule]]
+dir = "elm-stuff"
+markers = ["elm.json"]
+kind = "Elm build"
+
+[[rule]]
+dir = ".godot"
+markers = ["project.godot"]
+kind = "Godot import cache"
+
+[[rule]]
+dir = ".next"
+markers = ["@js"]
+kind = "Next.js build"
+
+[[rule]]
+dir = ".nuxt"
+markers = ["@js"]
+kind = "Nuxt build"
+
+[[rule]]
+dir = ".output"
+markers = ["@nuxt"]
+kind = "Nuxt output"
+
+[[rule]]
+dir = ".svelte-kit"
+markers = ["@js"]
+kind = "SvelteKit build"
+
+[[rule]]
+dir = ".astro"
+markers = ["@js"]
+kind = "Astro cache"
+
+[[rule]]
+dir = ".docusaurus"
+markers = ["@js"]
+kind = "Docusaurus cache"
+
+[[rule]]
+dir = ".turbo"
+markers = ["@js"]
+kind = "Turbo cache"
+
+[[rule]]
+dir = ".nx"
+markers = ["@js"]
+kind = "Nx cache"
+
+[[rule]]
+dir = ".swc"
+markers = ["@js"]
+kind = "SWC cache"
+
+[[rule]]
+dir = ".parcel-cache"
+markers = ["@js"]
+kind = "Parcel cache"
+
+[[rule]]
+dir = ".angular"
+markers = ["@js"]
+kind = "Angular cache"
+
+[[rule]]
+dir = ".expo"
+markers = ["@js"]
+kind = "Expo cache"
+
+[[rule]]
+dir = "dist"
+markers = ["@js"]
+kind = "JS dist"
+
+[[rule]]
+dir = "coverage"
+markers = ["@js"]
+kind = "Coverage report"
+
+[[rule]]
+dir = "htmlcov"
+markers = ["@py"]
+kind = "Coverage report"
+
+[[rule]]
+dir = "__pycache__"
+markers = []
+kind = "Python bytecode"
+
+[[rule]]
+dir = ".pytest_cache"
+markers = []
+kind = "Pytest cache"
+
+[[rule]]
+dir = ".mypy_cache"
+markers = []
+kind = "Mypy cache"
+
+[[rule]]
+dir = ".ruff_cache"
+markers = []
+kind = "Ruff cache"
+
+[[rule]]
+dir = "node_modules"
+markers = ["@js"]
+kind = "node_modules"
+redownload = true
+
+[[rule]]
+dir = "Pods"
+markers = ["Podfile"]
+kind = "CocoaPods"
+redownload = true
+
+[[rule]]
+dir = ".venv"
+markers = []
+kind = "Python venv"
+redownload = true
+
+[[rule]]
+dir = "venv"
+markers = ["requirements.txt", "pyproject.toml", "setup.py"]
+kind = "Python venv"
+redownload = true
+
+[[rule]]
+dir = ".tox"
+markers = ["@py"]
+kind = "tox envs"
+redownload = true
+
+[[rule]]
+dir = ".nox"
+markers = ["@py"]
+kind = "nox envs"
+redownload = true
+
+[[rule]]
+dir = ".pixi"
+markers = ["pixi.toml"]
+kind = "Pixi envs"
+redownload = true
+
+[[rule]]
+dir = "deps"
+markers = ["mix.exs"]
+kind = "Elixir deps"
+redownload = true
+
+[[rule]]
+dir = "vendor"
+markers = ["composer.json"]
+kind = "Composer vendor"
+redownload = true
+
+[[rule]]
+dir = ".terraform"
+markers = [".terraform.lock.hcl"]
+kind = "Terraform providers"
+redownload = true
+
+[[rule]]
+dir = ".terragrunt-cache"
+markers = ["terragrunt.hcl"]
+kind = "Terragrunt cache"
+redownload = true

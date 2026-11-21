@@ -75,7 +75,7 @@ jobs:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - name: Test
-        run: cd app && cargo test --release --locked
+        run: cd app && cargo test --release --locked --workspace
 
       - name: Fetch Sparkle (checksum-pinned)
         run: scripts/fetch-sparkle.sh

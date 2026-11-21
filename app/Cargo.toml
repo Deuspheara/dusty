@@ -1,17 +1,36 @@
-[package]
-name = "dusty"
+[workspace]
+members = ["crates/dusty-core", "crates/dusty-cli"]
+
+[workspace.package]
 version = "0.1.0-beta.1"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/Deuspheara/dusty"
+
+[workspace.lints.rust]
+# objc 0.2's msg_send! expands to `cfg(feature = "cargo-clippy")`; accept it instead of warning on every call
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
+[package]
+name = "dusty"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 publish = false
+default-run = "dusty-app"
 description = "Dusty: a playful macOS disk cleaner that never throws away what you would have to re-download."
 
+# the app's binary is dusty-app (bundled as Dusty.app/Contents/MacOS/Dusty); `dusty` is the CLI
+[[bin]]
+name = "dusty-app"
+path = "src/main.rs"
+
 [dependencies]
+dusty-core = { path = "crates/dusty-core" }
 # runtime_shaders: Metal shaders are compiled at launch, so building needs no Metal toolchain
 gpui = { version = "0.2.2", features = ["runtime_shaders"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-serde_json = "1"
 libc = "0.2"
 raw-window-handle = "0.6"
 anyhow = "1"
@@ -29,3 +48,6 @@ opt-level = 2
 [profile.release]
 lto = "thin"
 codegen-units = 4
+
+[lints]
+workspace = true

@@ -1,6 +1,4 @@
 # build output
-node_modules/
-dist/
 app/target/
 app/vendor/
 *.dmg

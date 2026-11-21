@@ -1,0 +1,20 @@
+[package]
+name = "dusty-core"
+description = "Dusty's engine: finds what can be cleaned on a Mac, and cleans it safely. No UI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+
+[lints]
+workspace = true
