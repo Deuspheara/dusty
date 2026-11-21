@@ -5,8 +5,9 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
 import { scanProjects, type Artifact } from "./projects.js";
+import { IGNORE_FILE, IgnoreList, appRunning, assertSafe } from "./safety.js";
 import { GROUP_LABELS, scanTargets, type Group, type Target } from "./targets.js";
-import { HOME, formatBytes, freeSpace, home, mapLimit, run, tildify } from "./utils.js";
+import { HOME, formatBytes, freeSpace, home, mapLimit, run, tildify, totalSize } from "./utils.js";
 
 interface Options {
   roots: string[];
@@ -66,14 +67,42 @@ function artifactsToTargets(artifacts: Artifact[], roots: string[], keepRecentDa
   }));
 }
 
+/** Drops ignored items/paths, and paths another target already covers (never counted twice). */
+async function settle(targets: Target[], ignore: IgnoreList): Promise<Target[]> {
+  const claimed = new Set<string>();
+  const above = new Set<string>();
+  const ancestors = (q: string) => {
+    const out: string[] = [];
+    for (let d = path.dirname(q); d !== path.dirname(d); d = path.dirname(d)) out.push(d);
+    return out;
+  };
+  const out: Target[] = [];
+  for (const t of targets) {
+    if (ignore.blocksTarget(t.id)) continue;
+    const paths = t.paths.filter((q) => !ignore.blocksPath(q) && !claimed.has(q) && !ancestors(q).some((a) => claimed.has(a)) && !above.has(q));
+    if (paths.length !== t.paths.length) {
+      if (paths.length === 0 && t.commands.length === 0) continue;
+      t.paths = paths;
+      t.bytes = await totalSize(paths);
+    }
+    for (const q of paths) {
+      claimed.add(q);
+      for (const a of ancestors(q)) above.add(a);
+    }
+    out.push(t);
+  }
+  return out;
+}
+
 async function scanAll(opts: Options): Promise<Target[]> {
   const s = p.spinner();
   s.start("Scanning projects for build artifacts…");
+  const ignore = IgnoreList.load();
   const [artifacts, system] = await Promise.all([
-    scanProjects(opts.roots, (m) => s.message(m)),
+    scanProjects(opts.roots, (m) => s.message(m), ignore),
     scanTargets({ roots: opts.roots }),
   ]);
-  const targets = [...artifactsToTargets(artifacts, opts.roots, opts.keepRecent), ...system]
+  const targets = (await settle([...artifactsToTargets(artifacts, opts.roots, opts.keepRecent), ...system], ignore))
     .filter((t) => t.bytes >= opts.minSize * 1024 * 1024 || (t.bytes === 0 && t.commands.length > 0))
     .sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || b.bytes - a.bytes);
   const total = targets.reduce((s, t) => s + t.bytes, 0);
@@ -133,26 +162,39 @@ function printManualHints() {
 
 // ───────────────────────── cleaning ─────────────────────────
 
-function assertSafe(target: string) {
-  const resolved = path.resolve(target);
-  const forbidden = [HOME, home("Documents"), home("Library"), home("Library/Caches"), "/"];
-  if (!resolved.startsWith(HOME + path.sep) || forbidden.includes(resolved)) {
-    throw new Error(`Refusing to delete unsafe path: ${resolved}`);
-  }
-}
-
 async function cleanTarget(t: Target, dryRun: boolean): Promise<string[]> {
   const errors: string[] = [];
+  const ignore = IgnoreList.load();
+  if (ignore.broken) return [`Nothing was deleted: ${ignore.broken}.`];
   for (const c of t.commands) {
     if (dryRun) continue;
     const r = await run(c.cmd, c.args);
     // pkill returns 1 when nothing matched: not an error
     if (!r.ok && c.cmd !== "pkill") errors.push(`${c.cmd} ${c.args.join(" ")}: ${r.stderr.trim().split("\n")[0]}`);
   }
+  // an app's cache is left alone while the app is open
+  if (t.guard && (await appRunning(t.guard.pattern))) {
+    return [...errors, `${t.guard.name} is open, so its cache was left alone. Quit it and run dusty again.`];
+  }
   await mapLimit(t.paths, 4, async (target) => {
-    assertSafe(target);
+    try {
+      assertSafe(target);
+    } catch (e) {
+      errors.push((e as Error).message);
+      return;
+    }
+    if (ignore.blocksPath(target)) {
+      errors.push(`Left ${tildify(target)} alone: it's on your ignore list (${tildify(IGNORE_FILE)}).`);
+      return;
+    }
     if (dryRun) return;
-    const r = await run("/bin/rm", ["-rf", target]);
+    // -x: never cross into a volume mounted somewhere inside the folder
+    let r = await run("/bin/rm", ["-rfx", "--", target]);
+    if (!r.ok && r.stderr.includes("Permission denied")) {
+      // read-only caches (Go modules…): make our own files writable (never following symlinks), then retry
+      await run("/bin/chmod", ["-R", "-P", "u+w", "--", target]);
+      r = await run("/bin/rm", ["-rfx", "--", target]);
+    }
     if (!r.ok) errors.push(`${tildify(target)}: ${r.stderr.trim().split("\n")[0]}`);
   });
   return errors;
@@ -186,8 +228,9 @@ async function clean(targets: Target[], opts: Options) {
 
 async function cmdScan(opts: Options) {
   if (opts.json) {
-    const artifacts = await scanProjects(opts.roots);
-    const targets = [...artifactsToTargets(artifacts, opts.roots, opts.keepRecent), ...(await scanTargets({ roots: opts.roots }))];
+    const ignore = IgnoreList.load();
+    const artifacts = await scanProjects(opts.roots, undefined, ignore);
+    const targets = await settle([...artifactsToTargets(artifacts, opts.roots, opts.keepRecent), ...(await scanTargets({ roots: opts.roots }))], ignore);
     console.log(JSON.stringify(targets, null, 2));
     return;
   }

@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { isProtectedName, type Guard } from "./safety.js";
 import { children, pathsTarget, type ScanContext, type TargetDef } from "./targets.js";
 import { exists, home, isDir, listDir, run, totalSize, which } from "./utils.js";
 
@@ -39,6 +40,22 @@ const ELECTRON_CACHE_DIRS = [
   "logs",
 ];
 
+/** Cache folders of a VS Code-family editor; the rest of its Application Support folder is never touched. */
+const EDITOR_CACHE_DIRS = ["Cache", "Code Cache", "GPUCache", "CachedData", "CachedExtensionVSIXs", "DawnGraphiteCache", "DawnWebGPUCache", "logs", "Crashpad/completed"];
+
+const guarded = (def: TargetDef, guard: Guard): TargetDef => ({ ...def, guard });
+
+function editorCache(id: string, label: string, folders: string[], name: string, pattern: string): TargetDef {
+  return guarded(
+    pathsTarget({ id, label, group: "cache", defaultOn: true }, async () => {
+      const out: string[] = [];
+      for (const f of folders) for (const c of EDITOR_CACHE_DIRS) out.push(...(await listDir(home("Library/Application Support", f, c))));
+      return out;
+    }),
+    { name, pattern },
+  );
+}
+
 /** Versioned IDE data dirs, e.g. AndroidStudio2025.3.4 → product "AndroidStudio". */
 async function oldIdeDirs(parent: string): Promise<string[]> {
   const byProduct = new Map<string, string[]>();
@@ -75,10 +92,52 @@ export function extraTargets(): TargetDef[] {
       async () => [home(".dartServer/.analysis-driver")],
     ),
     pathsTarget(
-      { id: "electron-caches", label: "App caches (VS Code, Zed, Slack…)", group: "cache", defaultOn: true },
+      { id: "dev-build-caches", label: "Compiler & linter caches (Go, Zig, ESLint, Vite, Ruff…)", group: "cache", defaultOn: true },
+      // local build/lint results only: nothing in here was downloaded
+      async () =>
+        ["Library/Caches/go-build", ".cache/go-build", ".cache/zig", ".cache/eslint", ".cache/prettier", ".cache/vite", ".cache/webpack", ".cache/mypy", ".cache/ruff", ".android/build-cache"].map(
+          (p) => home(p),
+        ),
+    ),
+    guarded(
+      pathsTarget({ id: "xcode-caches", label: "Xcode & simulator caches", group: "cache", defaultOn: true }, async () => [
+        ...(await listDir(home("Library/Caches/com.apple.dt.Xcode"))),
+        ...(await listDir(home("Library/Developer/CoreSimulator/Caches"))),
+      ]),
+      { name: "Xcode or Simulator", pattern: "/(Xcode|Simulator).app/Contents/MacOS/" },
+    ),
+    guarded(
+      pathsTarget({ id: "jetbrains-caches", label: "JetBrains IDE caches & indexes (rebuilt on open)", group: "cache", defaultOn: false }, async () => {
+        // the newest folder per IDE (older versions are `old-ide-data`): like File → Invalidate Caches
+        const parent = home("Library/Caches/JetBrains");
+        const old = new Set(await oldIdeDirs(parent));
+        const out: string[] = [];
+        for (const d of await listDir(parent)) if (!old.has(d) && (await isDir(d))) out.push(...(await listDir(d)));
+        return out;
+      }),
+      { name: "a JetBrains IDE", pattern: "\\.app/Contents/MacOS/(idea|pycharm|webstorm|goland|clion|rustrover|rider|phpstorm|rubymine|datagrip|dataspell|aqua|fleet)( |$)" },
+    ),
+    editorCache("vscode-cache", "VS Code cache", ["Code", "Code - Insiders"], "VS Code", "/Visual Studio Code( - Insiders)?.app/Contents/MacOS/"),
+    editorCache("cursor-cache", "Cursor cache", ["Cursor"], "Cursor", "/Cursor.app/Contents/MacOS/"),
+    editorCache("windsurf-cache", "Windsurf cache", ["Windsurf"], "Windsurf", "/Windsurf.app/Contents/MacOS/"),
+    pathsTarget({ id: "dev-logs", label: "Dev tool logs (npm, old iPhone device logs)", group: "cache", defaultOn: true }, async () => {
+      const out = await listDir(home(".npm/_logs"));
+      for (const p of await listDir(home("Library/Developer/Xcode/iOS Device Logs"))) if (await olderThan(p, 30)) out.push(p);
+      return out;
+    }),
+    pathsTarget({ id: "xcode-archives-old", label: "Xcode archives older than 6 months ⚠ dSYMs", group: "redownload", defaultOn: false }, async () => {
+      // Archives/<date>/<name>.xcarchive: each one holds the dSYMs needed to read that build's crash logs
+      const out: string[] = [];
+      for (const d of await listDir(home("Library/Developer/Xcode/Archives")))
+        for (const a of await listDir(d)) if (a.endsWith(".xcarchive") && (await olderThan(a, 180))) out.push(a);
+      return out;
+    }),
+    pathsTarget(
+      { id: "electron-caches", label: "App caches (Slack, Discord, Notion…)", group: "cache", defaultOn: true },
       async () => {
         const out: string[] = [];
         for (const app of await listDir(home("Library/Application Support"))) {
+          if (isProtectedName(path.basename(app))) continue;
           for (const c of ELECTRON_CACHE_DIRS) {
             const p = path.join(app, c);
             if (await isDir(p)) out.push(p);

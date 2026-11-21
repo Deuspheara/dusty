@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { IgnoreList } from "./safety.js";
 import { run, sizeOf } from "./utils.js";
 
 /**
@@ -17,7 +18,12 @@ interface Rule {
 
 const GRADLE = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradlew"];
 const JS = ["package.json"];
+const PY = ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "tox.ini", "noxfile.py"];
+const NUXT = ["nuxt.config.ts", "nuxt.config.js", "nuxt.config.mjs"];
+/** `*.ext` = any file with that extension. */
+const DOTNET = ["*.csproj", "*.fsproj", "*.vbproj"];
 
+// Same rules, same order as the app (app/src/engine.rs). First match wins.
 const RULES: Rule[] = [
   // Flutter / Dart
   { name: "build", markers: ["pubspec.yaml"], kind: "Flutter build" },
@@ -29,8 +35,11 @@ const RULES: Rule[] = [
   { name: ".cxx", markers: GRADLE, kind: "Android NDK build" },
   { name: ".externalNativeBuild", markers: GRADLE, kind: "Android NDK build" },
   { name: ".kotlin", markers: GRADLE, kind: "Kotlin cache" },
-  // Rust / Maven
+  // Rust / Maven / Scala
   { name: "target", markers: ["Cargo.toml", "pom.xml"], kind: "Rust/Maven target" },
+  { name: "target", markers: ["build.sbt"], kind: "Scala target" },
+  { name: ".bloop", markers: ["build.sbt"], kind: "Scala Bloop cache" },
+  { name: ".metals", markers: ["build.sbt"], kind: "Scala Metals cache" },
   // Swift / Xcode
   { name: ".build", markers: ["Package.swift"], kind: "SwiftPM build" },
   { name: "DerivedData", markers: [], kind: "Xcode DerivedData" },
@@ -42,15 +51,31 @@ const RULES: Rule[] = [
   { name: ".zig-cache", markers: ["build.zig"], kind: "Zig cache" },
   { name: "zig-cache", markers: ["build.zig"], kind: "Zig cache" },
   { name: "zig-out", markers: ["build.zig"], kind: "Zig output" },
+  // .NET, Elixir, Haskell, Elm, Godot
+  { name: "bin", markers: DOTNET, kind: ".NET build" },
+  { name: "obj", markers: DOTNET, kind: ".NET build" },
+  { name: "_build", markers: ["mix.exs"], kind: "Elixir build" },
+  { name: ".elixir_ls", markers: ["mix.exs"], kind: "ElixirLS cache" },
+  { name: ".stack-work", markers: ["stack.yaml"], kind: "Haskell Stack build" },
+  { name: "dist-newstyle", markers: ["cabal.project", "*.cabal"], kind: "Haskell Cabal build" },
+  { name: "elm-stuff", markers: ["elm.json"], kind: "Elm build" },
+  { name: ".godot", markers: ["project.godot"], kind: "Godot import cache" },
   // JS / TS
   { name: ".next", markers: JS, kind: "Next.js build" },
   { name: ".nuxt", markers: JS, kind: "Nuxt build" },
+  { name: ".output", markers: NUXT, kind: "Nuxt output" },
   { name: ".svelte-kit", markers: JS, kind: "SvelteKit build" },
+  { name: ".astro", markers: JS, kind: "Astro cache" },
+  { name: ".docusaurus", markers: JS, kind: "Docusaurus cache" },
   { name: ".turbo", markers: JS, kind: "Turbo cache" },
+  { name: ".nx", markers: JS, kind: "Nx cache" },
+  { name: ".swc", markers: JS, kind: "SWC cache" },
   { name: ".parcel-cache", markers: JS, kind: "Parcel cache" },
   { name: ".angular", markers: JS, kind: "Angular cache" },
   { name: ".expo", markers: JS, kind: "Expo cache" },
   { name: "dist", markers: JS, kind: "JS dist" },
+  { name: "coverage", markers: JS, kind: "Coverage report" },
+  { name: "htmlcov", markers: PY, kind: "Coverage report" },
   // Python
   { name: "__pycache__", markers: [], kind: "Python bytecode" },
   { name: ".pytest_cache", markers: [], kind: "Pytest cache" },
@@ -61,6 +86,13 @@ const RULES: Rule[] = [
   { name: "Pods", markers: ["Podfile"], kind: "CocoaPods", redownload: true },
   { name: ".venv", markers: [], kind: "Python venv", redownload: true },
   { name: "venv", markers: ["requirements.txt", "pyproject.toml", "setup.py"], kind: "Python venv", redownload: true },
+  { name: ".tox", markers: PY, kind: "tox envs", redownload: true },
+  { name: ".nox", markers: PY, kind: "nox envs", redownload: true },
+  { name: ".pixi", markers: ["pixi.toml"], kind: "Pixi envs", redownload: true },
+  { name: "deps", markers: ["mix.exs"], kind: "Elixir deps", redownload: true },
+  { name: "vendor", markers: ["composer.json"], kind: "Composer vendor", redownload: true },
+  { name: ".terraform", markers: [".terraform.lock.hcl"], kind: "Terraform providers", redownload: true },
+  { name: ".terragrunt-cache", markers: ["terragrunt.hcl"], kind: "Terragrunt cache", redownload: true },
 ];
 
 const NEVER_DESCEND = new Set([".git", ".hg", ".svn", "Library", ".Trash"]);
@@ -78,12 +110,20 @@ function matchRule(dirName: string, parentEntries: Set<string>): Rule | undefine
   for (const r of RULES) {
     const nameOk = typeof r.name === "string" ? r.name === dirName : r.name.test(dirName);
     if (!nameOk) continue;
-    if (r.markers.length === 0 || r.markers.some((m) => parentEntries.has(m))) return r;
+    if (r.markers.length === 0 || r.markers.some((m) => hasMarker(m, parentEntries))) return r;
   }
   return undefined;
 }
 
-async function walk(dir: string, found: { path: string; rule: Rule }[], depth: number): Promise<void> {
+function hasMarker(marker: string, entries: Set<string>): boolean {
+  if (!marker.startsWith("*")) return entries.has(marker);
+  const ext = marker.slice(1);
+  for (const n of entries) if (n.length > ext.length && n.endsWith(ext)) return true;
+  return false;
+}
+
+/** Never follows symlinks and never leaves the volume the root lives on (`dev`). */
+async function walk(dir: string, found: { path: string; rule: Rule }[], depth: number, dev: number): Promise<void> {
   if (depth > 12) return;
   let entries: import("node:fs").Dirent[];
   try {
@@ -97,11 +137,16 @@ async function walk(dir: string, found: { path: string; rule: Rule }[], depth: n
     if (!e.isDirectory() || e.isSymbolicLink()) continue;
     if (NEVER_DESCEND.has(e.name)) continue;
     const full = path.join(dir, e.name);
+    try {
+      if ((await fs.lstat(full)).dev !== dev) continue; // a mount point inside a project
+    } catch {
+      continue;
+    }
     const rule = matchRule(e.name, names);
     if (rule) found.push({ path: full, rule });
     else if (e.name !== "node_modules") subdirs.push(full);
   }
-  await Promise.all(subdirs.map((d) => walk(d, found, depth + 1)));
+  await Promise.all(subdirs.map((d) => walk(d, found, depth + 1, dev)));
 }
 
 async function gitRoot(dir: string): Promise<string | null> {
@@ -144,12 +189,15 @@ async function filterGitIgnored(candidates: string[]): Promise<Set<string>> {
   return keep;
 }
 
-export async function scanProjects(roots: string[], onProgress?: (msg: string) => void): Promise<Artifact[]> {
-  const found: { path: string; rule: Rule }[] = [];
+export async function scanProjects(roots: string[], onProgress?: (msg: string) => void, ignore = IgnoreList.load()): Promise<Artifact[]> {
+  let found: { path: string; rule: Rule }[] = [];
   for (const r of roots) {
     onProgress?.(`Walking ${r}`);
-    await walk(r, found, 0);
+    try {
+      await walk(r, found, 0, (await fs.stat(r)).dev);
+    } catch {}
   }
+  found = found.filter((f) => !ignore.blocksPath(f.path));
   // Drop candidates nested inside another candidate (e.g. build/ inside .dart_tool/)
   found.sort((a, b) => a.path.length - b.path.length);
   const kept: typeof found = [];
@@ -165,10 +213,13 @@ export async function scanProjects(roots: string[], onProgress?: (msg: string) =
   const sizes = await sizeOf(safe.map((s) => s.path));
   const artifacts: Artifact[] = [];
   for (const s of safe) {
+    // a project counts as touched when its artifact or the project folder itself changed
     let mtimeMs = 0;
-    try {
-      mtimeMs = (await fs.stat(s.path)).mtimeMs;
-    } catch {}
+    for (const p of [s.path, path.dirname(s.path)]) {
+      try {
+        mtimeMs = Math.max(mtimeMs, (await fs.lstat(p)).mtimeMs);
+      } catch {}
+    }
     artifacts.push({
       path: s.path,
       project: path.dirname(s.path),

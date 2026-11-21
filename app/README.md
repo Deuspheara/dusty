@@ -20,6 +20,7 @@ open target/Dusty.app
 - **Splash:** purple badge + dust sweep, then an iris opens on Dusty and the home screen builds in a stagger
   (under a second, click to skip; `DUSTY_SPLASH_SLOW=10` plays it in slow motion).
 - **Practice run:** toggle it on *Choose items*; nothing is deleted.
+- **Reduce motion:** follows the macOS setting (no splash, confetti or slides); `DUSTY_REDUCE_MOTION=1|0` forces it.
 - **Testing:** `DUSTY_FORCE_DRY=1` forces every clean into a practice run at the engine level
   (`open --env DUSTY_FORCE_DRY=1 target/Dusty.app`). `Dusty --scan` prints a headless scan, `Dusty --bench` measures Dusty (CPU vs GPU), `DUSTY_TRACE=1` logs
   frame rates and startup time.
