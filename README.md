@@ -10,11 +10,11 @@ A small macOS app that sniffs out build folders, dev caches and app junk,<br>
 then clears them without touching anything you'd have to download again.
 
 [![CI](https://github.com/Deuspheara/dusty/actions/workflows/ci.yml/badge.svg)](https://github.com/Deuspheara/dusty/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Deuspheara/dusty?color=7C5CFF&label=release)](https://github.com/Deuspheara/dusty/releases/latest)
+[![Release](https://img.shields.io/github/v/release/Deuspheara/dusty?include_prereleases&color=7C5CFF&label=release)](https://github.com/Deuspheara/dusty/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-22C993)](LICENSE)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-2B2340?logo=apple)
 
-[**Download**](https://github.com/Deuspheara/dusty/releases/latest) ·
+[**Download**](https://github.com/Deuspheara/dusty/releases) ·
 [**Website**](https://deuspheara.github.io/dusty/) ·
 [What it cleans](#what-dusty-cleans) ·
 [Safety](#house-rules) ·
@@ -39,12 +39,15 @@ then clears them without touching anything you'd have to download again.
 
 ## Install
 
-1. Grab `Dusty-x.y.z.dmg` from the [latest release](https://github.com/Deuspheara/dusty/releases/latest).
-2. Drag **Dusty** to Applications.
-3. Releases aren't notarized yet, so the first time, right-click Dusty → **Open** (or run
-   `xattr -dr com.apple.quarantine /Applications/Dusty.app`).
+1. Grab `Dusty-x.y.z.dmg` from the [releases](https://github.com/Deuspheara/dusty/releases).
+2. Drag **Dusty** to Applications and open it. Releases are signed and notarized by Apple, so it just opens.
 
 Runs on Apple silicon and Intel, macOS 13 Ventura or later.
+
+**Updates** come by themselves: Dusty checks once a day and shows what's new before anything is installed
+(**Dusty → Check for Updates…** to look right away). Every update is verified twice: Apple's notarization and an
+EdDSA signature that only Dusty's release pipeline holds the key to. Betas ship as GitHub pre-releases; a beta
+keeps following betas, and **Dusty → Get Beta Updates** switches any copy over.
 
 ## What Dusty cleans
 
@@ -128,16 +131,29 @@ and [DESIGN.md](DESIGN.md) for the visual language.
 ## Releasing
 
 ```bash
-scripts/release.sh 0.2.0
+scripts/release.sh 0.2.0          # stable
+scripts/release.sh 0.2.0-beta.1   # beta: a GitHub pre-release, offered only to beta users
 ```
 
-That bumps the version in `app/Cargo.toml`, `package.json` and the CLI, commits, tags `v0.2.0` and pushes. The
-[Release workflow](.github/workflows/release.yml) builds a universal `Dusty.app`, packs a DMG and a zip, and publishes
-them with generated notes. Signing and notarization switch on by themselves once the `MACOS_*` and `NOTARY_*`
-repository secrets exist (see the workflow header).
+That bumps the version in `app/Cargo.toml`, `package.json` and the CLI, commits, tags and pushes. The
+[Release workflow](.github/workflows/release.yml) then:
 
-Every push and pull request runs [gitleaks](https://github.com/gitleaks/gitleaks), the Rust tests and the CLI build.
-Run the same secret scan locally before you commit:
+1. tests and builds a universal `Dusty.app` from scratch (no build cache), with [Sparkle](https://sparkle-project.org)
+   embedded for updates;
+2. signs it with the Developer ID and **fails if the signing team isn't the expected one**;
+3. notarizes and staples the app and the DMG, and checks both with Gatekeeper;
+4. signs the update zip with the Sparkle EdDSA key and publishes DMG, zip, checksums and
+   [build provenance](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations)
+   (`gh attestation verify Dusty-x.y.z.dmg -R Deuspheara/dusty`);
+5. rebuilds the update feed at `deuspheara.github.io/dusty/appcast.xml` from every release.
+
+It needs seven repository secrets (the Developer ID certificate, the notarization API key and the Sparkle key;
+the list is at the top of the build job). A release stops at its first step if one is missing.
+
+Every push and pull request runs the tests and builds, plus security checks: [gitleaks](https://github.com/gitleaks/gitleaks)
+for secrets, `cargo audit` and `npm audit` (with registry signatures) for vulnerable dependencies,
+[zizmor](https://docs.zizmor.sh) for workflow security, dependency review on pull requests and CodeQL. Actions are
+pinned to commit hashes and kept fresh by Dependabot. Run the same secret scan locally before you commit:
 
 ```bash
 brew install gitleaks pre-commit && pre-commit install
