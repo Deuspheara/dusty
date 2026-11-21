@@ -78,6 +78,26 @@ pub fn haptic(kind: Haptic) {
 #[cfg(not(target_os = "macos"))]
 pub fn haptic(_kind: Haptic) {}
 
+/// System Settings → Accessibility → Display → Reduce motion.
+#[cfg(target_os = "macos")]
+pub fn reduce_motion() -> bool {
+    use objc::runtime::{Object, BOOL, NO};
+    use objc::{class, msg_send, sel, sel_impl};
+    unsafe {
+        let ws: *mut Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if ws.is_null() {
+            return false;
+        }
+        let v: BOOL = msg_send![ws, accessibilityDisplayShouldReduceMotion];
+        v != NO
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn reduce_motion() -> bool {
+    false
+}
+
 // ───────────────────────── app icon variants ─────────────────────────
 
 /// Icon colors the user can pick from the Dusty → Icon menu. The bundle icon (Finder) stays purple;

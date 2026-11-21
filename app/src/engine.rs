@@ -218,31 +218,72 @@ fn name_of(p: &Path) -> String {
     p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
-/// Real on-disk sizes via `du -skx` (APFS clones and sparse files counted right, never crosses volumes).
+/// Real on-disk sizes (allocated blocks, so sparse files count right), measured natively and in parallel.
+/// Like `du -skx`, it never follows symlinks and never crosses into another volume. Unlike separate `du` runs,
+/// a hard-linked file is counted once per call, and iCloud placeholders (dataless folders) are never opened,
+/// which would make macOS download them. Paths that don't exist are absent from the map.
 pub fn size_of(paths: &[PathBuf]) -> HashMap<PathBuf, u64> {
     let out = Mutex::new(HashMap::new());
-    let chunks: Vec<&[PathBuf]> = paths.chunks(200).collect();
+    let seen: Mutex<HashSet<(u64, u64)>> = Mutex::new(HashSet::new());
     let next = AtomicUsize::new(0);
+    let deadline = Instant::now() + SIZE_BUDGET;
+    let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8).min(paths.len().max(1));
     std::thread::scope(|s| {
-        for _ in 0..4.min(chunks.len().max(1)) {
+        for _ in 0..workers {
             s.spawn(|| loop {
                 let i = next.fetch_add(1, Ordering::SeqCst);
-                let Some(chunk) = chunks.get(i) else { break };
-                let mut args = vec!["-skx".to_string()];
-                args.extend(chunk.iter().map(|p| p.to_string_lossy().into_owned()));
-                let r = run("/usr/bin/du", &args, Duration::from_secs(600), None);
-                let mut map = out.lock().unwrap();
-                for line in r.stdout.lines() {
-                    if let Some((kb, path)) = line.split_once('\t') {
-                        if let Ok(kb) = kb.trim().parse::<u64>() {
-                            map.insert(PathBuf::from(path), kb * 1024);
-                        }
-                    }
+                let Some(p) = paths.get(i) else { break };
+                if let Some(b) = tree_size(p, &seen, deadline) {
+                    out.lock().unwrap().insert(p.clone(), b);
                 }
             });
         }
     });
     out.into_inner().unwrap()
+}
+
+/// A pathological folder (millions of files, a hung network mount) can't stall a scan past this:
+/// past the deadline, sizes stop growing and the scan moves on (the delete itself is unaffected).
+const SIZE_BUDGET: Duration = Duration::from_secs(240);
+
+fn tree_size(root: &Path, seen: &Mutex<HashSet<(u64, u64)>>, deadline: Instant) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(root).ok()?;
+    let dev = meta.dev();
+    let mut total = 0u64;
+    let mut stack = vec![(root.to_path_buf(), meta)];
+    while let Some((p, m)) = stack.pop() {
+        if !m.is_dir() && m.nlink() > 1 && !seen.lock().unwrap().insert((m.dev(), m.ino())) {
+            continue; // another link to a file already counted
+        }
+        total += m.blocks() * 512;
+        if !m.is_dir() || is_dataless(&m) || Instant::now() > deadline {
+            continue;
+        }
+        let Ok(rd) = std::fs::read_dir(&p) else { continue };
+        for e in rd.flatten() {
+            // DirEntry::metadata is lstat: symlinks are measured as links, never followed
+            if let Ok(em) = e.metadata() {
+                if em.dev() == dev {
+                    stack.push((e.path(), em));
+                }
+            }
+        }
+    }
+    Some(total)
+}
+
+/// An iCloud / File Provider placeholder whose contents live in the cloud. Reading it downloads it,
+/// and deleting it deletes the cloud copy while freeing nothing here.
+#[cfg(target_os = "macos")]
+fn is_dataless(m: &std::fs::Metadata) -> bool {
+    use std::os::macos::fs::MetadataExt;
+    const SF_DATALESS: u32 = 0x4000_0000;
+    m.st_flags() & SF_DATALESS != 0
+}
+#[cfg(not(target_os = "macos"))]
+fn is_dataless(_: &std::fs::Metadata) -> bool {
+    false
 }
 
 fn total_size(paths: &[PathBuf]) -> u64 {
@@ -364,12 +405,17 @@ struct Rule {
 
 const GRADLE: &[&str] = &["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradlew"];
 const JS: &[&str] = &["package.json"];
+const PY: &[&str] = &["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "tox.ini", "noxfile.py"];
+const NUXT: &[&str] = &["nuxt.config.ts", "nuxt.config.js", "nuxt.config.mjs"];
+const DOTNET: &[&str] = &["*.csproj", "*.fsproj", "*.vbproj"];
 
 macro_rules! rule {
     ($n:expr, $m:expr, $k:expr) => { Rule { name: $n, prefix: false, markers: $m, kind: $k, redownload: false } };
     ($n:expr, $m:expr, $k:expr, re) => { Rule { name: $n, prefix: false, markers: $m, kind: $k, redownload: true } };
 }
 
+/// First match wins. A marker is a file name the parent folder must contain; `*.ext` means any file
+/// with that extension. An empty marker list is only used for names no tool uses for source.
 const RULES: &[Rule] = &[
     rule!("build", &["pubspec.yaml"], "Flutter build"),
     rule!(".dart_tool", &["pubspec.yaml"], "Dart tool cache"),
@@ -380,6 +426,9 @@ const RULES: &[Rule] = &[
     rule!(".externalNativeBuild", GRADLE, "Android NDK build"),
     rule!(".kotlin", GRADLE, "Kotlin cache"),
     rule!("target", &["Cargo.toml", "pom.xml"], "Rust/Maven target"),
+    rule!("target", &["build.sbt"], "Scala target"),
+    rule!(".bloop", &["build.sbt"], "Scala Bloop cache"),
+    rule!(".metals", &["build.sbt"], "Scala Metals cache"),
     rule!(".build", &["Package.swift"], "SwiftPM build"),
     rule!("DerivedData", &[], "Xcode DerivedData"),
     rule!("build", &["CMakeLists.txt", "meson.build"], "CMake build"),
@@ -388,14 +437,29 @@ const RULES: &[Rule] = &[
     rule!(".zig-cache", &["build.zig"], "Zig cache"),
     rule!("zig-cache", &["build.zig"], "Zig cache"),
     rule!("zig-out", &["build.zig"], "Zig output"),
+    rule!("bin", DOTNET, ".NET build"),
+    rule!("obj", DOTNET, ".NET build"),
+    rule!("_build", &["mix.exs"], "Elixir build"),
+    rule!(".elixir_ls", &["mix.exs"], "ElixirLS cache"),
+    rule!(".stack-work", &["stack.yaml"], "Haskell Stack build"),
+    rule!("dist-newstyle", &["cabal.project", "*.cabal"], "Haskell Cabal build"),
+    rule!("elm-stuff", &["elm.json"], "Elm build"),
+    rule!(".godot", &["project.godot"], "Godot import cache"),
     rule!(".next", JS, "Next.js build"),
     rule!(".nuxt", JS, "Nuxt build"),
+    rule!(".output", NUXT, "Nuxt output"),
     rule!(".svelte-kit", JS, "SvelteKit build"),
+    rule!(".astro", JS, "Astro cache"),
+    rule!(".docusaurus", JS, "Docusaurus cache"),
     rule!(".turbo", JS, "Turbo cache"),
+    rule!(".nx", JS, "Nx cache"),
+    rule!(".swc", JS, "SWC cache"),
     rule!(".parcel-cache", JS, "Parcel cache"),
     rule!(".angular", JS, "Angular cache"),
     rule!(".expo", JS, "Expo cache"),
     rule!("dist", JS, "JS dist"),
+    rule!("coverage", JS, "Coverage report"),
+    rule!("htmlcov", PY, "Coverage report"),
     rule!("__pycache__", &[], "Python bytecode"),
     rule!(".pytest_cache", &[], "Pytest cache"),
     rule!(".mypy_cache", &[], "Mypy cache"),
@@ -404,6 +468,13 @@ const RULES: &[Rule] = &[
     rule!("Pods", &["Podfile"], "CocoaPods", re),
     rule!(".venv", &[], "Python venv", re),
     rule!("venv", &["requirements.txt", "pyproject.toml", "setup.py"], "Python venv", re),
+    rule!(".tox", PY, "tox envs", re),
+    rule!(".nox", PY, "nox envs", re),
+    rule!(".pixi", &["pixi.toml"], "Pixi envs", re),
+    rule!("deps", &["mix.exs"], "Elixir deps", re),
+    rule!("vendor", &["composer.json"], "Composer vendor", re),
+    rule!(".terraform", &[".terraform.lock.hcl"], "Terraform providers", re),
+    rule!(".terragrunt-cache", &["terragrunt.hcl"], "Terragrunt cache", re),
 ];
 
 const NEVER_DESCEND: &[&str] = &[".git", ".hg", ".svn", "Library", ".Trash"];
@@ -421,13 +492,24 @@ pub struct Artifact {
 fn match_rule(dir_name: &str, parent: &HashSet<String>) -> Option<&'static Rule> {
     RULES.iter().find(|r| {
         let name_ok = if r.prefix { dir_name.starts_with(r.name) } else { dir_name == r.name };
-        name_ok && (r.markers.is_empty() || r.markers.iter().any(|m| parent.contains(*m)))
+        name_ok && (r.markers.is_empty() || r.markers.iter().any(|m| has_marker(m, parent)))
     })
 }
 
-/// Parallel directory walk with a shared work queue.
+fn has_marker(marker: &str, parent: &HashSet<String>) -> bool {
+    match marker.strip_prefix('*') {
+        Some(ext) => parent.iter().any(|n| n.len() > ext.len() && n.ends_with(ext)),
+        None => parent.contains(marker),
+    }
+}
+
+/// Parallel directory walk with a shared work queue. Never follows symlinks, never leaves the volume
+/// a root lives on, and never opens iCloud placeholders (that would download them).
 fn walk_roots(roots: &[PathBuf], cancel: &AtomicBool) -> Vec<(PathBuf, &'static Rule)> {
-    let queue: Mutex<Vec<(PathBuf, usize)>> = Mutex::new(roots.iter().map(|r| (r.clone(), 0)).collect());
+    use std::os::unix::fs::MetadataExt;
+    // each queued folder carries the device of its root: a mount point inside a project is never entered
+    let queue: Mutex<Vec<(PathBuf, usize, u64)>> =
+        Mutex::new(roots.iter().filter_map(|r| Some((r.clone(), 0, std::fs::metadata(r).ok()?.dev()))).collect());
     let busy = AtomicUsize::new(0);
     let found = Mutex::new(vec![]);
     let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8);
@@ -445,7 +527,7 @@ fn walk_roots(roots: &[PathBuf], cancel: &AtomicBool) -> Vec<(PathBuf, &'static 
                     }
                     it
                 };
-                let Some((dir, depth)) = item else {
+                let Some((dir, depth, dev)) = item else {
                     if busy.load(Ordering::SeqCst) == 0 {
                         break;
                     }
@@ -466,10 +548,14 @@ fn walk_roots(roots: &[PathBuf], cancel: &AtomicBool) -> Vec<(PathBuf, &'static 
                             if NEVER_DESCEND.contains(&name.as_str()) {
                                 continue;
                             }
+                            match e.metadata() {
+                                Ok(m) if m.dev() == dev && !is_dataless(&m) => {}
+                                _ => continue,
+                            }
                             if let Some(rule) = match_rule(&name, &names) {
                                 found.lock().unwrap().push((e.path(), rule));
                             } else if name != "node_modules" {
-                                sub.push((e.path(), depth + 1));
+                                sub.push((e.path(), depth + 1, dev));
                             }
                         }
                         queue.lock().unwrap().extend(sub);
@@ -519,9 +605,11 @@ fn filter_git_ignored(candidates: &[PathBuf]) -> HashSet<PathBuf> {
     keep
 }
 
-pub fn scan_projects(roots: &[PathBuf], progress: &Mutex<ScanProgress>, cancel: &AtomicBool) -> Vec<Artifact> {
+/// Project artifacts under `roots`, minus anything on the ignore list.
+pub fn scan_projects(roots: &[PathBuf], progress: &Mutex<ScanProgress>, cancel: &AtomicBool, ignore: &IgnoreList) -> Vec<Artifact> {
     progress.lock().unwrap().message = "Walking your projects…".into();
     let mut found = walk_roots(roots, cancel);
+    found.retain(|(p, _)| !ignore.blocks_path(p));
     // drop candidates nested inside another candidate (e.g. build/ inside .dart_tool/)
     found.sort_by_key(|(p, _)| p.as_os_str().len());
     let mut kept: Vec<(PathBuf, &Rule)> = vec![];
@@ -539,7 +627,8 @@ pub fn scan_projects(roots: &[PathBuf], progress: &Mutex<ScanProgress>, cancel: 
         .into_iter()
         .map(|(p, r)| Artifact {
             bytes: *sizes.get(&p).unwrap_or(&0),
-            mtime: mtime(&p),
+            // a project counts as touched when its artifact or the project folder itself changed
+            mtime: mtime(&p).max(p.parent().map(mtime).unwrap_or(UNIX_EPOCH)),
             project: p.parent().unwrap_or(&p).to_path_buf(),
             kind: r.kind,
             redownload: r.redownload,
@@ -641,7 +730,12 @@ fn paths_def(
 }
 
 const GRADLE_KEEP: &[&str] = &["modules-2", "journal-1", "CACHEDIR.TAG"];
-const LIB_CACHE_KEEP: &[&str] = &["Homebrew", "Yarn", "pnpm", "CocoaPods", "ms-playwright", "pip"];
+/// Download caches in ~/Library/Caches: never swept as "app caches" (deleting them costs a download),
+/// offered instead by their own opt-in targets.
+const LIB_CACHE_KEEP: &[&str] = &[
+    "Homebrew", "Yarn", "pnpm", "CocoaPods", "ms-playwright", "ms-playwright-go", "pip", "pypoetry", "composer", "deno", "electron",
+    "node-gyp", "org.swift.swiftpm", "org.carthage.CarthageKit", "Coursier", "bazel", "mise",
+];
 const ELECTRON_CACHE_DIRS: &[&str] = &[
     "Cache", "Code Cache", "GPUCache", "CachedData", "CachedExtensionVSIXs", "DawnGraphiteCache", "DawnWebGPUCache", "ShaderCache",
     "GrShaderCache", "Service Worker/CacheStorage", "Service Worker/ScriptCache", "Crashpad/completed", "logs",
@@ -735,9 +829,8 @@ fn defs() -> Vec<Def> {
         // Xcode / iOS
         paths_def("xcode-deriveddata", "Xcode DerivedData", Cache, true, vec![], |_| children(&h("Library/Developer/Xcode/DerivedData"), |_| false)),
         paths_def("xcode-device-support", "Xcode device support files", Cache, true, vec![], |_| {
-            let mut v = children(&h("Library/Developer/Xcode/iOS DeviceSupport"), |_| false);
-            v.extend(children(&h("Library/Developer/Xcode/watchOS DeviceSupport"), |_| false));
-            v
+            // copied again from the device the next time it's plugged in
+            ["iOS", "watchOS", "tvOS", "visionOS", "xrOS", "macOS"].iter().flat_map(|os| children(&h(&format!("Library/Developer/Xcode/{os} DeviceSupport")), |_| false)).collect()
         }),
         Def {
             id: "sim-unavailable",
@@ -759,6 +852,20 @@ fn defs() -> Vec<Def> {
                 Some((bytes, vec![], vec![cmd("xcrun", &["simctl", "delete", "unavailable"])], Some(format!("{} devices", udids.len()))))
             }),
         },
+        guarded(paths_def("xcode-caches", "Xcode & simulator caches", Cache, true, vec![], |_| {
+            let mut v = contents(&h("Library/Caches/com.apple.dt.Xcode"));
+            v.extend(contents(&h("Library/Developer/CoreSimulator/Caches")));
+            v
+        }), Guard::App("Xcode or Simulator", "/(Xcode|Simulator).app/Contents/MacOS/")),
+        paths_def("xcode-archives-old", "Xcode archives older than 6 months ⚠ dSYMs", Junk, false, vec![], |_| {
+            // Archives/<date>/<name>.xcarchive: each one holds the dSYMs needed to read that build's crash logs
+            list_dir(&h("Library/Developer/Xcode/Archives"))
+                .into_iter()
+                .filter(|d| is_dir(d))
+                .flat_map(|d| list_dir(&d))
+                .filter(|a| name_of(a).ends_with(".xcarchive") && older_than(a, 180))
+                .collect()
+        }),
         Def {
             id: "sim-runtimes-old",
             label: "Simulator runtimes unused for 30 days",
@@ -814,6 +921,11 @@ fn defs() -> Vec<Def> {
             children(&h("Library/Caches"), |n| n.starts_with("com.apple.") || LIB_CACHE_KEEP.contains(&n) || OWN_TARGET_CACHES.contains(&n) || is_protected_name(n))
         }),
         paths_def("library-logs", "App logs & crash reports", Junk, true, vec![], |_| children(&h("Library/Logs"), |n| is_protected_name(n))),
+        paths_def("dev-logs", "Dev tool logs (npm, old iPhone device logs)", Junk, true, vec![], |_| {
+            let mut v = contents(&h(".npm/_logs"));
+            v.extend(list_dir(&h("Library/Developer/Xcode/iOS Device Logs")).into_iter().filter(|p| older_than(p, 30)));
+            v
+        }),
         Def {
             id: "homebrew",
             label: "Homebrew cleanup",
@@ -831,15 +943,47 @@ fn defs() -> Vec<Def> {
         },
         paths_def("trash", "Trash", Junk, false, vec![], |_| children(&h(".Trash"), |_| false)),
         // Package managers (re-download)
-        paths_def("js-caches", "npm/pnpm/yarn/bun caches", Redownload, false, vec![], |_| {
-            [".npm/_cacache", "Library/pnpm/store", ".local/share/pnpm/store", ".yarn/berry/cache", "Library/Caches/Yarn", ".bun/install/cache"].iter().map(|p| h(p)).collect()
+        paths_def("js-caches", "npm/pnpm/yarn/bun/deno caches", Redownload, false, vec![], |_| {
+            [
+                ".npm/_cacache", "Library/pnpm/store", ".local/share/pnpm/store", "Library/Caches/pnpm", ".yarn/berry/cache", "Library/Caches/Yarn", ".bun/install/cache",
+                "Library/Caches/deno", ".cache/node/corepack", "Library/Caches/node-gyp", ".cache/node-gyp", ".node-gyp",
+            ]
+            .iter()
+            .map(|p| h(p))
+            .collect()
         }),
         paths_def("pub-cache", "Dart/Flutter pub cache", Redownload, false, vec![], |_| vec![h(".pub-cache/hosted"), h(".pub-cache/git")]),
-        paths_def("other-pkg", "Maven/Cargo/pip/uv/Go caches", Redownload, false, vec![], |_| {
-            [".m2/repository", ".cargo/registry", ".cargo/git", ".cache/pip", ".cache/uv", "go/pkg/mod"].iter().map(|p| h(p)).collect()
+        paths_def("other-pkg", "Maven/Cargo/pip/uv/Poetry/Go/Composer caches", Redownload, false, vec![], |_| {
+            // Poetry: only its download caches, never `virtualenvs/` (those are your project envs)
+            [
+                ".m2/repository", ".cargo/registry", ".cargo/git", ".cache/pip", "Library/Caches/pip", ".cache/uv", "Library/Caches/pypoetry/cache",
+                "Library/Caches/pypoetry/artifacts", "go/pkg/mod", "Library/Caches/composer", ".composer/cache", ".nuget/packages",
+            ]
+            .iter()
+            .map(|p| h(p))
+            .collect()
+        }),
+        paths_def("apple-pkg-caches", "SwiftPM/CocoaPods/Carthage caches", Redownload, false, vec![], |_| {
+            ["Library/Caches/org.swift.swiftpm", ".cache/swift-package-manager", "Library/Caches/CocoaPods", "Library/Caches/org.carthage.CarthageKit"].iter().map(|p| h(p)).collect()
+        }),
+        paths_def("browser-runtimes", "Playwright, Puppeteer & Electron downloads", Redownload, false, vec![], |_| {
+            ["Library/Caches/ms-playwright", "Library/Caches/ms-playwright-go", ".cache/puppeteer", "Library/Caches/electron", ".cache/electron"].iter().map(|p| h(p)).collect()
         }),
         // extra targets
         paths_def("dart-analysis", "Dart analysis server cache", Cache, true, vec![], |_| vec![h(".dartServer/.analysis-driver")]),
+        paths_def("dev-build-caches", "Compiler & linter caches (Go, Zig, ESLint, Vite, Ruff…)", Cache, true, vec![], |_| {
+            // local build/lint results only: nothing in here was downloaded
+            ["Library/Caches/go-build", ".cache/go-build", ".cache/zig", ".cache/eslint", ".cache/prettier", ".cache/vite", ".cache/webpack", ".cache/mypy", ".cache/ruff", ".android/build-cache"]
+                .iter()
+                .map(|p| h(p))
+                .collect()
+        }),
+        guarded(paths_def("jetbrains-caches", "JetBrains IDE caches & indexes (rebuilt on open)", Cache, false, vec![], |_| {
+            // the newest folder per IDE (older versions are `old-ide-data`): like File → Invalidate Caches
+            let parent = h("Library/Caches/JetBrains");
+            let old: HashSet<PathBuf> = old_ide_dirs(&parent).into_iter().collect();
+            list_dir(&parent).into_iter().filter(|d| is_dir(d) && !old.contains(d)).flat_map(|d| contents(&d)).collect()
+        }), Guard::App("a JetBrains IDE", "\\.app/Contents/MacOS/(idea|pycharm|webstorm|goland|clion|rustrover|rider|phpstorm|rubymine|datagrip|dataspell|aqua|fleet)( |$)")),
         guarded(paths_def("electron-caches", "Desktop app caches (Electron apps)", Apps, true, vec![], |_| {
             let mut out = vec![];
             for app in list_dir(&h("Library/Application Support")) {
@@ -856,6 +1000,9 @@ fn defs() -> Vec<Def> {
             }
             out
         }), Guard::PerAppFolder),
+        editor_cache("vscode-cache", "VS Code cache", &["Code", "Code - Insiders"], "VS Code", "/Visual Studio Code( - Insiders)?.app/Contents/MacOS/"),
+        editor_cache("cursor-cache", "Cursor cache", &["Cursor"], "Cursor", "/Cursor.app/Contents/MacOS/"),
+        editor_cache("windsurf-cache", "Windsurf cache", &["Windsurf"], "Windsurf", "/Windsurf.app/Contents/MacOS/"),
         paths_def("old-ide-data", "Old Android Studio/JetBrains versions", Cache, true, vec![], |_| {
             ["Library/Application Support/Google", "Library/Application Support/JetBrains", "Library/Caches/Google", "Library/Caches/JetBrains", "Library/Logs/Google"]
                 .iter()
@@ -1030,11 +1177,24 @@ fn electron_app(roots: &[&str]) -> Vec<PathBuf> {
     roots.iter().flat_map(|r| ["Cache", "Code Cache", "GPUCache", "Service Worker/CacheStorage"].iter().flat_map(move |c| contents(&h(r).join(c)))).collect()
 }
 
+/// Cache folders of a VS Code-family editor. Its Application Support folder is otherwise protected
+/// (settings, workspace state, extension storage), so only these folders are ever touched.
+const EDITOR_CACHE_DIRS: &[&str] = &["Cache", "Code Cache", "GPUCache", "CachedData", "CachedExtensionVSIXs", "DawnGraphiteCache", "DawnWebGPUCache", "logs", "Crashpad/completed"];
+
+fn editor_cache(id: &'static str, label: &'static str, folders: &'static [&'static str], app: &'static str, pattern: &'static str) -> Def {
+    guarded(
+        paths_def(id, label, Group::Apps, true, vec![], move |_| {
+            folders.iter().flat_map(|f| EDITOR_CACHE_DIRS.iter().flat_map(move |c| contents(&h("Library/Application Support").join(f).join(c)))).collect()
+        }),
+        Guard::App(app, pattern),
+    )
+}
+
 /// ~/Library/Caches folders that have their own (guarded) target above, so the sweep skips them.
 const OWN_TARGET_CACHES: &[&str] = &[
     "Google", "Firefox", "com.microsoft.edgemac", "BraveSoftware", "company.thebrowser.Browser", "com.vivaldi.Vivaldi", "us.zoom.xos",
     "com.microsoft.teams2", "net.whatsapp.WhatsApp", "ru.keepcoder.Telegram", "com.figma.Desktop", "com.openai.chat",
-    "com.anthropic.claudefordesktop", "org.videolan.vlc", "com.colliderli.iina", "tv.plex.player.desktop", "JetBrains",
+    "com.anthropic.claudefordesktop", "org.videolan.vlc", "com.colliderli.iina", "tv.plex.player.desktop", "JetBrains", "go-build",
 ];
 /// ~/Library/Application Support folders with their own target (or browser profiles) the Electron sweep skips.
 const OWN_TARGET_SUPPORT: &[&str] = &["discord", "Slack", "Arc", "Google", "Microsoft Edge", "BraveSoftware", "Vivaldi", "Adobe"];
@@ -1046,20 +1206,26 @@ const PROTECTED_NAMES: &[&str] = &[
     "com.spotify.client", "Spotify", "com.apple.Music", "com.apple.podcasts", "com.apple.iBooksX", "com.apple.iBooks", "com.apple.BKAgentService",
     // password managers, auth, keychains
     "com.1password.*", "com.agilebits.*", "1Password*", "com.lastpass.*", "com.dashlane.*", "com.bitwarden.*", "Bitwarden", "com.keepassx.*", "org.keepassxc.*",
-    "com.authy.*", "com.yubico.*", "*keychain*", "*Keychain*",
+    "com.authy.*", "com.yubico.*", "*keychain*", "*Keychain*", "com.proton.pass*", "*ProtonPass*", "Enpass*", "in.sinew.*",
+    "com.nordpass.*", "com.keepersecurity.*",
     // cloud sync & backup
     "com.apple.bird", "com.apple.CloudDocs*", "CloudDocs", "com.dropbox.*", "com.getdropbox.*", "*Dropbox*", "com.google.GoogleDrive", "*GoogleDrive*", "Google Drive",
     "com.microsoft.OneDrive*", "*OneDrive*", "com.box.desktop*", "com.backblaze.*", "*Backblaze*", "com.synology.*", "com.amazon.drive",
+    "com.nextcloud.*", "Nextcloud", "com.owncloud.*", "*pCloud*", "mega.mac*", "MEGAsync", "com.seafile.*", "com.resilio.*", "*Syncthing*",
     // VPNs & network tools
     "*tailscale*", "io.tailscale.*", "com.wireguard.*", "*WireGuard*", "*openvpn*", "*nordvpn*", "*expressvpn*", "*protonvpn*", "*mullvad*", "*surfshark*",
     "*cloudflare*warp*", "*zerotier*", "*clash*", "*Clash*", "com.nssurge.*",
+    "PanGPS", "com.paloaltonetworks.*", "*GlobalProtect*", "com.cisco.*anyconnect*", "*AnyConnect*", "com.fortinet.*", "*FortiClient*",
+    "*windscribe*", "com.privateinternetaccess.*",
     // input methods
     "*inputmethod*", "*InputMethod*", "com.apple.inputmethod.*", "im.rime.*",
     // editors, IDEs, AI apps keep indexes and conversation state here
-    "com.jetbrains.*", "JetBrains*", "com.microsoft.VSCode*", "Code", "Cursor", "com.todesktop.*", "Zed", "dev.zed.*", "com.anthropic.*", "Claude", "com.openai.codex", "Codex",
+    "com.jetbrains.*", "JetBrains*", "com.microsoft.VSCode*", "Code", "Code - Insiders", "Cursor", "Windsurf", "com.exafunction.*", "VSCodium",
+    "com.vscodium*", "com.todesktop.*", "Zed", "dev.zed.*", "com.anthropic.*", "Claude", "com.openai.codex", "Codex",
     "com.ollama.ollama", "Ollama", "com.lmstudio.lmstudio", "LM Studio", "lm-studio",
     // virtualization & containers (live disk images)
     "com.docker.docker", "Docker Desktop", "dev.orbstack.*", "OrbStack", "com.utmapp.UTM", "com.parallels.*", "com.vmware.fusion", "org.virtualbox.*",
+    "rancher-desktop", "io.rancherdesktop.*", "com.github.containers.*", "Podman Desktop", "com.vmware.*",
     // audio plugins, licenses
     "com.native-instruments.*", "com.paceap.*", "com.izotope.*", "iZotope", "com.avid.*",
     // browser automation runtimes that other tools depend on
@@ -1108,9 +1274,155 @@ fn protected_path(p: &Path) -> bool {
     const NEVER: &[&str] = &[
         "Library/Keychains", "Library/Mail", "Library/Accounts", "Library/Calendars", "Library/Contacts", "Library/Messages", "Library/Mobile Documents",
         "Library/Application Support/MobileSync", "Library/Application Support/AddressBook", "Library/Photos", "Library/Cookies", "Library/Preferences",
-        "Library/Group Containers/group.com.apple.notes", ".ssh", ".gnupg", ".aws", ".kube", "Pictures", "Movies", "Music", "Desktop",
+        "Library/Group Containers/group.com.apple.notes", "Library/CloudStorage", "Library/Application Support/FileProvider", ".ssh", ".gnupg", ".aws", ".kube",
+        ".config/dusty", "Pictures", "Movies", "Music", "Desktop",
     ];
     NEVER.iter().any(|n| p.starts_with(h(n))) || p.to_string_lossy().to_lowercase().contains(".photoslibrary")
+}
+
+// ───────────────────────── your ignore list ─────────────────────────
+
+/// `~/.config/dusty/ignore`: things Dusty must never delete, one per line (`#` starts a comment).
+///
+/// - `~/Documents/app/build` or `/abs/path`: that path, everything inside it, and any folder that
+///   contains it (deleting the parent would take it along). `*` matches within one folder name,
+///   `**` any number of folders. Matching ignores case, like APFS.
+/// - `node_modules` (a bare name, no `/`): any file or folder with that name, and what's inside it.
+/// - `id:docker-images` / `id:proj:*`: hide a whole item from the results (also commands like Docker).
+///
+/// Read by both the app and the CLI. If the file exists but can't be read, nothing is deleted.
+#[derive(Clone, Debug, Default)]
+pub struct IgnoreList {
+    paths: Vec<Vec<String>>,
+    ids: Vec<String>,
+    /// Set when the file exists but couldn't be read: every delete is refused.
+    pub broken: Option<String>,
+}
+
+pub fn ignore_file() -> PathBuf {
+    h(".config/dusty/ignore")
+}
+
+impl IgnoreList {
+    pub fn load() -> Self {
+        let f = ignore_file();
+        match std::fs::read_to_string(&f) {
+            Ok(text) => Self::parse(&text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(e) => Self { broken: Some(format!("couldn't read {} ({e})", tildify(&f))), ..Self::default() },
+        }
+    }
+
+    pub fn parse(text: &str) -> Self {
+        let mut out = Self::default();
+        for line in text.lines() {
+            let line = line.split_once('#').map_or(line, |(a, _)| a).trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some(id) = line.strip_prefix("id:") {
+                out.ids.push(id.trim().to_string());
+                continue;
+            }
+            let full = if line == "~" {
+                home()
+            } else if let Some(rest) = line.strip_prefix("~/") {
+                home().join(rest)
+            } else if line.starts_with('/') {
+                PathBuf::from(line)
+            } else if !line.contains('/') {
+                // bare name: any component anywhere
+                out.paths.push(vec!["**".into(), line.to_string()]);
+                continue;
+            } else {
+                home().join(line)
+            };
+            out.paths.push(components(&full));
+        }
+        out
+    }
+
+    pub fn blocks_target(&self, id: &str) -> bool {
+        self.ids.iter().any(|p| glob_match(p, id))
+    }
+
+    /// True when deleting `p` would delete something on the list.
+    pub fn blocks_path(&self, p: &Path) -> bool {
+        if self.paths.is_empty() {
+            return false;
+        }
+        let path = components(p);
+        let path: Vec<&str> = path.iter().map(String::as_str).collect();
+        self.paths.iter().any(|pat| {
+            let pat: Vec<&str> = pat.iter().map(String::as_str).collect();
+            overlaps(&pat, &path, false)
+        })
+    }
+}
+
+fn components(p: &Path) -> Vec<String> {
+    p.components().filter_map(|c| match c {
+        std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+        _ => None,
+    }).collect()
+}
+
+/// Does deleting `path` touch something `pat` matches? Either `pat` matches `path` or one of its
+/// ancestors (it's inside a protected folder), or `path` is an ancestor of a possible match (the
+/// delete would take it along). After a `**`, only the first two count: "contains something named X
+/// somewhere below" would block every folder.
+fn overlaps(pat: &[&str], path: &[&str], after_globstar: bool) -> bool {
+    match (pat.first(), path.first()) {
+        (None, _) => true,
+        (Some(&"**"), _) => overlaps(&pat[1..], path, true) || (!path.is_empty() && overlaps(pat, &path[1..], true)),
+        (Some(_), None) => !after_globstar,
+        (Some(seg), Some(name)) => glob_match(seg, name) && overlaps(&pat[1..], &path[1..], after_globstar),
+    }
+}
+
+/// Removes ignored targets and paths from scan results. A target that lost paths is measured again.
+fn apply_ignore(targets: Vec<Target>, ignore: &IgnoreList) -> Vec<Target> {
+    targets
+        .into_iter()
+        .filter(|t| !ignore.blocks_target(&t.id))
+        .filter_map(|mut t| {
+            let before = t.paths.len();
+            t.paths.retain(|p| !ignore.blocks_path(p));
+            if t.paths.len() == before {
+                return Some(t);
+            }
+            if t.paths.is_empty() && t.commands.is_empty() {
+                return None;
+            }
+            t.bytes = total_size(&t.paths);
+            Some(t)
+        })
+        .collect()
+}
+
+/// The same folder can't be offered twice: a path already claimed by an earlier target (or one inside
+/// it) is dropped from later targets, so totals never count it twice and a clean never fights itself.
+fn dedupe_paths(targets: Vec<Target>) -> Vec<Target> {
+    let mut claimed: HashSet<PathBuf> = HashSet::new();
+    // every ancestor of a claimed path: a later path equal to one of these contains a claimed path
+    let mut above: HashSet<PathBuf> = HashSet::new();
+    let mut out = vec![];
+    for mut t in targets {
+        let before = t.paths.len();
+        t.paths.retain(|p| !p.ancestors().any(|a| claimed.contains(a)) && !above.contains(p));
+        if t.paths.len() != before {
+            if t.paths.is_empty() && t.commands.is_empty() {
+                continue;
+            }
+            t.bytes = total_size(&t.paths);
+        }
+        for p in &t.paths {
+            above.extend(p.ancestors().skip(1).map(Path::to_path_buf));
+        }
+        claimed.extend(t.paths.iter().cloned());
+        out.push(t);
+    }
+    out
 }
 
 pub struct ScanOptions {
@@ -1122,8 +1434,9 @@ pub struct ScanOptions {
 /// Full scan. Streams results into `progress.found` as they arrive, returns the sorted list.
 pub fn scan_all(opts: &ScanOptions, progress: Arc<Mutex<ScanProgress>>, cancel: Arc<AtomicBool>) -> Vec<Target> {
     let defs = defs();
+    let ignore = IgnoreList::load();
     let next = AtomicUsize::new(0);
-    let system: Mutex<Vec<Target>> = Mutex::new(vec![]);
+    let system: Mutex<Vec<(usize, Target)>> = Mutex::new(vec![]);
     let mut projects = vec![];
     std::thread::scope(|s| {
         // system targets on a small pool
@@ -1137,21 +1450,27 @@ pub fn scan_all(opts: &ScanOptions, progress: Arc<Mutex<ScanProgress>>, cancel: 
                 let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (d.scan)(&opts.roots))).ok().flatten();
                 if let Some((bytes, paths, commands, detail)) = res {
                     let t = Target { id: d.id.into(), label: d.label.into(), group: d.group, default_on: d.default_on, bytes, paths, commands, detail, guard: d.guard.clone() };
+                    // honor the ignore list before the UI ever sees the item
+                    let Some(t) = apply_ignore(vec![t], &ignore).pop() else { continue };
                     let mut p = progress.lock().unwrap();
                     p.message = format!("Found {}", d.label);
                     p.found.push(t.clone());
                     drop(p);
-                    system.lock().unwrap().push(t);
+                    system.lock().unwrap().push((i, t));
                 }
             });
         }
         // project artifacts on the calling thread (it spawns its own walkers)
-        let arts = scan_projects(&opts.roots, &progress, &cancel);
-        projects = artifacts_to_targets(&arts, &opts.roots, opts.keep_recent_days);
+        let arts = scan_projects(&opts.roots, &progress, &cancel, &ignore);
+        projects = apply_ignore(artifacts_to_targets(&arts, &opts.roots, opts.keep_recent_days), &ignore);
         progress.lock().unwrap().found.extend(projects.iter().cloned());
     });
+    // definition order, not finishing order: dedupe must give the same answer every scan
+    let mut system = system.into_inner().unwrap();
+    system.sort_by_key(|(i, _)| *i);
+    let all = dedupe_paths(projects.into_iter().chain(system.into_iter().map(|(_, t)| t)).collect());
     let min = opts.min_size_mb * 1024 * 1024;
-    let mut all: Vec<Target> = projects.into_iter().chain(system.into_inner().unwrap()).filter(|t| t.bytes >= min || (t.bytes == 0 && !t.commands.is_empty())).collect();
+    let mut all: Vec<Target> = all.into_iter().filter(|t| t.bytes >= min || (t.bytes == 0 && !t.commands.is_empty())).collect();
     all.sort_by(|a, b| {
         let gi = |g: Group| Group::ORDER.iter().position(|x| *x == g).unwrap_or(0);
         gi(a.group).cmp(&gi(b.group)).then(b.bytes.cmp(&a.bytes))
@@ -1197,6 +1516,15 @@ pub fn assert_safe(target: &Path) -> Result<(), String> {
     };
     if let Some(why) = verdict(target) {
         return bad(why);
+    }
+    if let Ok(m) = std::fs::symlink_metadata(target) {
+        use std::os::unix::fs::MetadataExt;
+        if std::fs::metadata(&hm).is_ok_and(|hmeta| hmeta.dev() != m.dev()) {
+            return bad("on another volume");
+        }
+        if is_dataless(&m) {
+            return bad("stored in iCloud, not on this Mac");
+        }
     }
     // a symlinked ancestor could redirect the delete somewhere else: check where it really points
     if let (Some(parent), Some(name)) = (target.parent(), target.file_name()) {
@@ -1250,9 +1578,19 @@ pub fn clean_target(t: &Target, dry_run: bool) -> Vec<String> {
     }
     let mut running = HashMap::new();
     let mut skipped_apps: Vec<String> = vec![];
+    let ignore = IgnoreList::load();
+    if let Some(why) = &ignore.broken {
+        errors.push(format!("Nothing was deleted: {why}."));
+        return errors;
+    }
     for p in &t.paths {
         if let Err(e) = assert_safe(p) {
             errors.push(e);
+            continue;
+        }
+        let real = p.parent().and_then(|d| std::fs::canonicalize(d).ok()).zip(p.file_name()).map(|(d, n)| d.join(n));
+        if ignore.blocks_path(p) || real.is_some_and(|r| ignore.blocks_path(&r)) {
+            errors.push(format!("Left {} alone: it's on your ignore list ({}).", tildify(p), tildify(&ignore_file())));
             continue;
         }
         if let Some((app, pat)) = guard_for(t, p) {
@@ -1266,8 +1604,16 @@ pub fn clean_target(t: &Target, dry_run: bool) -> Vec<String> {
         if dry_run {
             continue;
         }
-        let args = vec!["-rf".to_string(), "--".into(), p.to_string_lossy().into_owned()];
-        let r = run("/bin/rm", &args, Duration::from_secs(1800), None);
+        // -x: never cross into a volume mounted somewhere inside the folder
+        let args = vec!["-rfx".to_string(), "--".into(), p.to_string_lossy().into_owned()];
+        let mut r = run("/bin/rm", &args, Duration::from_secs(1800), None);
+        if !r.ok && r.stderr.contains("Permission denied") {
+            // read-only caches (Go modules, some package stores): make our own files writable, then retry.
+            // -P: never follow a symlink out of the folder
+            let chmod = vec!["-R".to_string(), "-P".into(), "u+w".into(), "--".into(), p.to_string_lossy().into_owned()];
+            run("/bin/chmod", &chmod, Duration::from_secs(600), None);
+            r = run("/bin/rm", &args, Duration::from_secs(1800), None);
+        }
         if !r.ok {
             errors.push(format!("{}: {}", tildify(p), r.stderr.lines().next().unwrap_or("could not remove")));
         }
@@ -1282,8 +1628,37 @@ pub fn clean_target(t: &Target, dry_run: bool) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// Tests that read or fake $HOME run one at a time.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+    fn home_lock() -> std::sync::MutexGuard<'static, ()> {
+        HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn tmp_dir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("dusty-test-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn touch(p: &Path, bytes: usize) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, vec![7u8; bytes]).unwrap();
+    }
+
+    fn set_old(p: &Path, days: u64) {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(p.as_os_str().as_bytes()).unwrap();
+        let t = (SystemTime::now() - Duration::from_secs(days * 86400)).duration_since(UNIX_EPOCH).unwrap().as_secs() as libc::time_t;
+        let tv = [libc::timeval { tv_sec: t, tv_usec: 0 }, libc::timeval { tv_sec: t, tv_usec: 0 }];
+        assert_eq!(unsafe { libc::utimes(c.as_ptr(), tv.as_ptr()) }, 0);
+    }
+
     #[test]
     fn safety() {
+        let _g = home_lock();
+        assert!(assert_safe(&h("Library/CloudStorage/Dropbox/x")).is_err(), "File Provider folders are personal data");
+        assert!(assert_safe(&h(".config/dusty/ignore")).is_err(), "never the ignore list itself");
         assert!(assert_safe(&home()).is_err());
         assert!(assert_safe(&h("Documents")).is_err());
         assert!(assert_safe(&h("Library/Caches")).is_err());
@@ -1324,5 +1699,175 @@ mod tests {
         assert!(match_rule("src", &parent).is_none());
         let none: HashSet<String> = HashSet::new();
         assert!(match_rule("build", &none).is_none(), "build/ without a marker is never a candidate");
+
+        let set = |names: &[&str]| -> HashSet<String> { names.iter().map(|s| s.to_string()).collect() };
+        // .NET: bin/ and obj/ only next to a project file (suffix marker)
+        assert_eq!(match_rule("bin", &set(&["App.csproj", "Program.cs"])).map(|r| r.kind), Some(".NET build"));
+        assert!(match_rule("bin", &set(&["package.json", "Makefile"])).is_none(), "a plain bin/ folder is never touched");
+        assert!(match_rule("bin", &set(&[".csproj"])).is_none(), "the extension alone isn't a project file");
+        // the same name means different things in different projects
+        assert_eq!(match_rule("target", &set(&["build.sbt"])).map(|r| r.kind), Some("Scala target"));
+        assert_eq!(match_rule("target", &set(&["Cargo.toml"])).map(|r| r.kind), Some("Rust/Maven target"));
+        assert!(match_rule("target", &set(&["README.md"])).is_none());
+        let deps = match_rule("deps", &set(&["mix.exs"])).unwrap();
+        assert!(deps.redownload, "Elixir deps cost a download");
+        assert!(match_rule("deps", &set(&["package.json"])).is_none());
+        assert!(!match_rule("_build", &set(&["mix.exs"])).unwrap().redownload);
+        assert!(match_rule(".output", &set(&["package.json"])).is_none(), ".output needs a Nuxt config, not just package.json");
+        assert!(match_rule(".output", &set(&["package.json", "nuxt.config.ts"])).is_some());
+        assert!(match_rule("vendor", &set(&["go.mod"])).is_none(), "Go vendor/ is usually source you committed");
+        assert!(match_rule("vendor", &set(&["composer.json"])).unwrap().redownload);
+        assert!(match_rule(".terraform", &set(&["main.tf"])).is_none(), "no lock file, no providers to restore");
+        assert!(match_rule(".terraform", &set(&["main.tf", ".terraform.lock.hcl"])).unwrap().redownload);
+        assert_eq!(match_rule("dist-newstyle", &set(&["mylib.cabal"])).map(|r| r.kind), Some("Haskell Cabal build"));
+        assert!(match_rule(".tox", &set(&["tox.ini"])).unwrap().redownload);
+        assert!(match_rule("coverage", &set(&["README.md"])).is_none());
+    }
+
+    #[test]
+    fn ignore_list() {
+        let _g = home_lock();
+        let ig = IgnoreList::parse(
+            "# keep these\n\n~/Documents/app/build\n~/Documents/*/keep-me   # trailing comment\nSecret Stuff\n~/.cache/**/models\nid:docker-*\n",
+        );
+        // the path itself and everything inside it
+        assert!(ig.blocks_path(&h("Documents/app/build")));
+        assert!(ig.blocks_path(&h("Documents/app/build/intermediates")));
+        assert!(ig.blocks_path(&h("documents/APP/Build")), "case-insensitive, like APFS");
+        // a parent folder would take it along
+        assert!(ig.blocks_path(&h("Documents/app")));
+        assert!(!ig.blocks_path(&h("Documents/other/build")));
+        assert!(!ig.blocks_path(&h("Documents/app/.dart_tool")));
+        // `*` inside a path
+        assert!(ig.blocks_path(&h("Documents/x/keep-me/y")));
+        assert!(ig.blocks_path(&h("Documents/x")), "Documents/x may hold keep-me");
+        // bare names match anywhere, but don't block every parent folder
+        assert!(ig.blocks_path(&h("Library/Caches/Secret Stuff")));
+        assert!(ig.blocks_path(&h("Library/Caches/secret stuff/blob")));
+        assert!(!ig.blocks_path(&h("Library/Caches/com.example")));
+        assert!(!ig.blocks_path(&h("Library/Caches")), "a bare name never blocks a folder for what might be below it");
+        // `**`
+        assert!(ig.blocks_path(&h(".cache/hf/hub/models")));
+        assert!(ig.blocks_path(&h(".cache/models")));
+        assert!(!ig.blocks_path(&h(".cache/pip")));
+        // ids
+        assert!(ig.blocks_target("docker-images"));
+        assert!(!ig.blocks_target("xcode-deriveddata"));
+        assert!(IgnoreList::parse("").paths.is_empty());
+        assert!(!IgnoreList::parse("# only a comment").blocks_path(&h("Documents")));
+    }
+
+    #[test]
+    fn ignore_list_filters_targets() {
+        let _g = home_lock();
+        let ig = IgnoreList::parse("~/nope/a\nid:hidden");
+        let t = |id: &str, paths: Vec<PathBuf>| Target {
+            id: id.into(), label: id.into(), group: Group::Cache, default_on: true, bytes: 123, paths, commands: vec![], detail: None, guard: Guard::None,
+        };
+        let out = apply_ignore(vec![t("keep", vec![h("nope/b")]), t("partial", vec![h("nope/a"), h("nope/c")]), t("gone", vec![h("nope/a/x")]), t("hidden", vec![h("nope/z")])], &ig);
+        let ids: Vec<&str> = out.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["keep", "partial"]);
+        assert_eq!(out[0].bytes, 123, "untouched targets keep their size");
+        assert_eq!(out[1].paths, vec![h("nope/c")]);
+        assert_eq!(out[1].bytes, 0, "re-measured after dropping a path (these don't exist)");
+    }
+
+    #[test]
+    fn dedupe_never_counts_twice() {
+        let t = |id: &str, paths: &[&str]| Target {
+            id: id.into(), label: id.into(), group: Group::Cache, default_on: true, bytes: 1, paths: paths.iter().map(PathBuf::from).collect(), commands: vec![], detail: None, guard: Guard::None,
+        };
+        let out = dedupe_paths(vec![
+            t("a", &["/x/cache/one", "/x/cache/two"]),
+            t("b", &["/x/cache/one/inner", "/x/other"]), // inside a's path
+            t("c", &["/x/cache"]),                       // contains a's paths
+            t("d", &["/x/cache/two"]),                   // exact duplicate, nothing left
+        ]);
+        let got: Vec<(&str, Vec<&str>)> = out.iter().map(|t| (t.id.as_str(), t.paths.iter().map(|p| p.to_str().unwrap()).collect())).collect();
+        assert_eq!(got, vec![("a", vec!["/x/cache/one", "/x/cache/two"]), ("b", vec!["/x/other"])]);
+    }
+
+    #[test]
+    fn native_sizes() {
+        let d = tmp_dir("size");
+        touch(&d.join("a/one.bin"), 100_000);
+        touch(&d.join("a/sub/two.bin"), 50_000);
+        // a hard link to the same data is only counted once
+        std::fs::hard_link(d.join("a/one.bin"), d.join("a/sub/link.bin")).unwrap();
+        // a symlink to something big outside is measured as a link, not followed
+        touch(&d.join("big/huge.bin"), 2_000_000);
+        std::os::unix::fs::symlink(d.join("big"), d.join("a/to-big")).unwrap();
+        let sizes = size_of(&[d.join("a"), d.join("missing")]);
+        assert!(!sizes.contains_key(&d.join("missing")));
+        let ours = sizes[&d.join("a")];
+        assert!(ours >= 150_000 && ours < 400_000, "got {ours}");
+        // agrees with du (which also counts each hard link once within one run)
+        let du = run_s("/usr/bin/du", &["-sk", &d.join("a").to_string_lossy()], 30).stdout;
+        let du_kb: u64 = du.split('\t').next().unwrap().trim().parse().unwrap();
+        assert!((ours / 1024).abs_diff(du_kb) <= 8, "native {} KB vs du {du_kb} KB", ours / 1024);
+        // across separate paths in one call, the hard link is still counted once
+        let split = size_of(&[d.join("a/one.bin"), d.join("a/sub/link.bin")]);
+        assert_eq!(split.values().filter(|b| **b > 0).count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Builds a fake home with the folders each target looks for, then checks that every target finds
+    /// its own and no folder is offered by two targets (or swept by the catch-all "app caches").
+    #[test]
+    fn targets_in_a_fake_home() {
+        let _g = home_lock();
+        let real_home = std::env::var_os("HOME");
+        let fake = tmp_dir("home");
+        for f in [
+            "Library/Caches/org.swift.swiftpm/repositories/x", "Library/Caches/pip/http/x", "Library/Caches/go-build/00/x", "Library/Caches/CocoaPods/Pods/x",
+            "Library/Caches/ms-playwright/chromium-1/x", "Library/Caches/electron/x", "Library/Caches/deno/x", "Library/Caches/pypoetry/cache/x",
+            "Library/Caches/pypoetry/virtualenvs/myproj/x", "Library/Caches/com.apple.dt.Xcode/x", "Library/Caches/JetBrains/IntelliJIdea2025.2/caches/x",
+            "Library/Caches/JetBrains/IntelliJIdea2024.3/caches/x", "Library/Caches/com.example.App/x", "Library/Caches/PanGPS/x",
+            ".cache/eslint/x", ".cache/puppeteer/x", ".npm/_logs/x.log", "Library/Application Support/Code/CachedData/abc/x",
+            "Library/Application Support/Code/User/settings.json", "Library/Application Support/Cursor/Cache/x", "Library/Application Support/SomeElectron/Cache/x",
+            "Library/Developer/Xcode/Archives/2020-01-01/Old.xcarchive/x", "Library/Developer/Xcode/Archives/2026-01-01/New.xcarchive/x",
+            "Library/Developer/Xcode/macOS DeviceSupport/15.0/x",
+        ] {
+            touch(&fake.join(f), 4096);
+        }
+        set_old(&fake.join("Library/Developer/Xcode/Archives/2020-01-01/Old.xcarchive"), 400);
+        unsafe { std::env::set_var("HOME", &fake) };
+        let command_based = ["homebrew", "sim-unavailable", "sim-runtimes-old", "sim-erase", "rust-old-toolchains"];
+        let mut by_target: Vec<(&str, Vec<PathBuf>)> = vec![];
+        for d in defs().iter().filter(|d| !d.id.starts_with("docker") && !command_based.contains(&d.id)) {
+            if let Some((_, paths, _, _)) = (d.scan)(&[]) {
+                by_target.push((d.id, paths));
+            }
+        }
+        match real_home {
+            Some(v) => unsafe { std::env::set_var("HOME", v) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+        let rel = |p: &PathBuf| p.strip_prefix(&fake).unwrap().to_string_lossy().into_owned();
+        let of = |id: &str| -> Vec<String> { by_target.iter().find(|(i, _)| *i == id).map(|(_, v)| v.iter().map(rel).collect()).unwrap_or_default() };
+        // no folder is offered twice, and none sits inside another target's folder
+        let all: Vec<(&str, &PathBuf)> = by_target.iter().flat_map(|(id, v)| v.iter().map(move |p| (*id, p))).collect();
+        for (i, (a, pa)) in all.iter().enumerate() {
+            for (b, pb) in &all[i + 1..] {
+                assert!(!(pa.starts_with(pb) || pb.starts_with(pa)), "{a} and {b} both cover {}", rel(pa));
+            }
+        }
+        let sweep = of("library-caches");
+        assert_eq!(sweep, vec!["Library/Caches/com.example.App"], "download caches, IDEs and VPNs stay out of the app-cache sweep");
+        assert!(of("apple-pkg-caches").contains(&"Library/Caches/org.swift.swiftpm".into()));
+        assert!(of("other-pkg").contains(&"Library/Caches/pip".into()));
+        assert!(of("other-pkg").iter().all(|p| !p.contains("virtualenvs")), "Poetry envs are never touched");
+        assert!(of("dev-build-caches").contains(&"Library/Caches/go-build".into()));
+        assert!(of("browser-runtimes").contains(&"Library/Caches/ms-playwright".into()));
+        assert_eq!(of("jetbrains-caches"), vec!["Library/Caches/JetBrains/IntelliJIdea2025.2/caches"]);
+        assert_eq!(of("old-ide-data"), vec!["Library/Caches/JetBrains/IntelliJIdea2024.3"]);
+        assert_eq!(of("vscode-cache"), vec!["Library/Application Support/Code/CachedData/abc"], "settings stay");
+        assert_eq!(of("cursor-cache"), vec!["Library/Application Support/Cursor/Cache/x"]);
+        assert!(of("electron-caches").iter().all(|p| !p.contains("/Code/") && !p.contains("/Cursor/")));
+        assert_eq!(of("xcode-archives-old"), vec!["Library/Developer/Xcode/Archives/2020-01-01/Old.xcarchive"]);
+        assert_eq!(of("xcode-caches"), vec!["Library/Caches/com.apple.dt.Xcode/x"]);
+        assert!(of("xcode-device-support").contains(&"Library/Developer/Xcode/macOS DeviceSupport/15.0".into()));
+        assert_eq!(of("dev-logs"), vec![".npm/_logs/x.log"]);
+        let _ = std::fs::remove_dir_all(&fake);
     }
 }

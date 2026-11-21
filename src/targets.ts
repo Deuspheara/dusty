@@ -1,5 +1,6 @@
 import path from "node:path";
 import { extraTargets } from "./extra-targets.js";
+import { type Guard, isProtectedName } from "./safety.js";
 import { home, listDir, parseDockerSize, run, sizeOf, totalSize, which } from "./utils.js";
 
 export type Group = "build" | "cache" | "docker" | "redownload";
@@ -27,6 +28,8 @@ export interface Target {
   /** Commands to run (before path deletion). */
   commands: Command[];
   detail?: string;
+  /** Skip (and report) the paths while this app is running: deleting a live cache can break it. */
+  guard?: Guard;
 }
 
 export interface TargetDef {
@@ -34,7 +37,8 @@ export interface TargetDef {
   label: string;
   group: Group;
   defaultOn: boolean;
-  scan: (ctx: ScanContext) => Promise<Omit<Target, "id" | "label" | "group" | "defaultOn"> | null>;
+  guard?: Guard;
+  scan: (ctx: ScanContext) => Promise<Omit<Target, "id" | "label" | "group" | "defaultOn" | "guard"> | null>;
 }
 
 export interface ScanContext {
@@ -65,8 +69,13 @@ export const children = async (dir: string, exclude: (name: string) => boolean =
   (await listDir(dir)).filter((p) => !exclude(path.basename(p)));
 
 const GRADLE_KEEP = new Set(["modules-2", "journal-1", "CACHEDIR.TAG"]);
-/** Download caches living in ~/Library/Caches: handled by their own targets or kept. */
-const LIB_CACHE_KEEP = new Set(["Homebrew", "Yarn", "pnpm", "CocoaPods", "ms-playwright", "pip"]);
+/** Download caches living in ~/Library/Caches: never swept (they cost a download), offered by their own opt-in targets. */
+const LIB_CACHE_KEEP = new Set([
+  "Homebrew", "Yarn", "pnpm", "CocoaPods", "ms-playwright", "ms-playwright-go", "pip", "pypoetry", "composer", "deno", "electron",
+  "node-gyp", "org.swift.swiftpm", "org.carthage.CarthageKit", "Coursier", "bazel", "mise",
+]);
+/** ~/Library/Caches folders with their own target, so the sweep skips them. */
+const OWN_TARGET_CACHES = new Set(["JetBrains", "go-build"]);
 
 export const TARGET_DEFS: TargetDef[] = [
   // ───────────── Xcode / iOS ─────────────
@@ -76,10 +85,12 @@ export const TARGET_DEFS: TargetDef[] = [
   ),
   pathsTarget(
     { id: "xcode-device-support", label: "Xcode iOS DeviceSupport", group: "cache", defaultOn: true },
-    async () => [
-      ...(await children(home("Library/Developer/Xcode/iOS DeviceSupport"))),
-      ...(await children(home("Library/Developer/Xcode/watchOS DeviceSupport"))),
-    ],
+    async () => {
+      // copied again from the device the next time it's plugged in
+      const out: string[] = [];
+      for (const os of ["iOS", "watchOS", "tvOS", "visionOS", "xrOS", "macOS"]) out.push(...(await children(home(`Library/Developer/Xcode/${os} DeviceSupport`))));
+      return out;
+    },
   ),
   {
     id: "sim-unavailable",
@@ -144,11 +155,11 @@ export const TARGET_DEFS: TargetDef[] = [
   // ───────────── Generic caches ─────────────
   pathsTarget(
     { id: "library-caches", label: "~/Library/Caches", group: "cache", defaultOn: true },
-    () => children(home("Library/Caches"), (n) => n.startsWith("com.apple.") || LIB_CACHE_KEEP.has(n)),
+    () => children(home("Library/Caches"), (n) => n.startsWith("com.apple.") || LIB_CACHE_KEEP.has(n) || OWN_TARGET_CACHES.has(n) || isProtectedName(n)),
   ),
   pathsTarget(
     { id: "library-logs", label: "~/Library/Logs", group: "cache", defaultOn: true },
-    () => children(home("Library/Logs")),
+    () => children(home("Library/Logs"), isProtectedName),
   ),
   {
     id: "homebrew",
@@ -170,30 +181,33 @@ export const TARGET_DEFS: TargetDef[] = [
 
   // ───────────── Package managers (re-download) ─────────────
   pathsTarget(
-    { id: "js-caches", label: "npm/pnpm/yarn/bun caches", group: "redownload", defaultOn: false },
-    async () => [
-      home(".npm/_cacache"),
-      home("Library/pnpm/store"),
-      home(".local/share/pnpm/store"),
-      home(".yarn/berry/cache"),
-      home("Library/Caches/Yarn"),
-      home(".bun/install/cache"),
-    ],
+    { id: "js-caches", label: "npm/pnpm/yarn/bun/deno caches", group: "redownload", defaultOn: false },
+    async () =>
+      [
+        ".npm/_cacache", "Library/pnpm/store", ".local/share/pnpm/store", "Library/Caches/pnpm", ".yarn/berry/cache", "Library/Caches/Yarn", ".bun/install/cache",
+        "Library/Caches/deno", ".cache/node/corepack", "Library/Caches/node-gyp", ".cache/node-gyp", ".node-gyp",
+      ].map((p) => home(p)),
   ),
   pathsTarget(
     { id: "pub-cache", label: "Dart/Flutter pub cache", group: "redownload", defaultOn: false },
     async () => [home(".pub-cache/hosted"), home(".pub-cache/git")],
   ),
   pathsTarget(
-    { id: "other-pkg", label: "Maven/Cargo/pip/uv/Go", group: "redownload", defaultOn: false },
-    async () => [
-      home(".m2/repository"),
-      home(".cargo/registry"),
-      home(".cargo/git"),
-      home(".cache/pip"),
-      home(".cache/uv"),
-      home("go/pkg/mod"),
-    ],
+    { id: "other-pkg", label: "Maven/Cargo/pip/uv/Poetry/Go/Composer", group: "redownload", defaultOn: false },
+    // Poetry: only its download caches, never `virtualenvs/` (those are your project envs)
+    async () =>
+      [
+        ".m2/repository", ".cargo/registry", ".cargo/git", ".cache/pip", "Library/Caches/pip", ".cache/uv", "Library/Caches/pypoetry/cache",
+        "Library/Caches/pypoetry/artifacts", "go/pkg/mod", "Library/Caches/composer", ".composer/cache", ".nuget/packages",
+      ].map((p) => home(p)),
+  ),
+  pathsTarget(
+    { id: "apple-pkg-caches", label: "SwiftPM/CocoaPods/Carthage caches", group: "redownload", defaultOn: false },
+    async () => ["Library/Caches/org.swift.swiftpm", ".cache/swift-package-manager", "Library/Caches/CocoaPods", "Library/Caches/org.carthage.CarthageKit"].map((p) => home(p)),
+  ),
+  pathsTarget(
+    { id: "browser-runtimes", label: "Playwright, Puppeteer & Electron downloads", group: "redownload", defaultOn: false },
+    async () => ["Library/Caches/ms-playwright", "Library/Caches/ms-playwright-go", ".cache/puppeteer", "Library/Caches/electron", ".cache/electron"].map((p) => home(p)),
   ),
 
   ...extraTargets(),
@@ -248,7 +262,7 @@ export async function scanTargets(ctx: ScanContext, onProgress?: (label: string)
         const r = await def.scan(ctx);
         onProgress?.(def.label);
         if (!r) return null;
-        return { id: def.id, label: def.label, group: def.group, defaultOn: def.defaultOn, ...r } satisfies Target;
+        return { id: def.id, label: def.label, group: def.group, defaultOn: def.defaultOn, ...(def.guard ? { guard: def.guard } : {}), ...r } satisfies Target;
       } catch {
         return null;
       }

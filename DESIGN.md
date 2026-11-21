@@ -108,6 +108,10 @@ the 512 px PNGs embedded in the app, and `app/assets/Dusty.icns`.
 - Springs over easing curves. Things pop, hop and settle.
 - The splash is under a second (badge pop, dust sweep, iris onto Dusty) and a click skips it.
 - Dusty runs at 60 fps while moving, 30 while breathing and 12 when the window isn't focused.
+- In the app, timings and spacing are named tokens in `ui.rs` (`motion::*`, `sp::*`, `radius::*`, `ts::*`):
+  things that arrive spring in (`back_out`), bars and counters fill with an ease-out, exits are faster than entrances.
+  Sizes count up and use tabular digits so they never jiggle.
+- With macOS **Reduce motion** on, the app skips the splash, confetti and slides; fades stay.
 - On the web, scrolling scrubs the story: blocks arc into Dusty's mouth, he squashes on each chomp, and confetti
   fires once at the end. Under `prefers-reduced-motion` the page shows the finished state without motion.
 
