@@ -20,6 +20,11 @@ open target/Dusty.app
 - **Splash:** purple badge + dust sweep, then an iris opens on Dusty and the home screen builds in a stagger
   (under a second, click to skip; `DUSTY_SPLASH_SLOW=10` plays it in slow motion).
 - **Practice run:** toggle it on *Choose items*; nothing is deleted.
+- **Updates:** [Sparkle 2](https://sparkle-project.org) does the checking, verifying and installing; Dusty draws the UI
+  (`src/updater.rs` is the Sparkle user driver, the sheet and the pill live in `src/ui.rs`). `scripts/fetch-sparkle.sh`
+  downloads the pinned framework into `vendor/`; without it the app still builds, with updates off.
+  `DUSTY_UPDATE_DEMO=found` (or `checking`, `downloading`, `ready`, `uptodate`, `error`…, add `-hidden` for the pill)
+  shows a state without a feed; `DUSTY_UPDATE_FEED=<url> DUSTY_UPDATE_CHECK=1` checks a test feed at launch.
 - **Reduce motion:** follows the macOS setting (no splash, confetti or slides); `DUSTY_REDUCE_MOTION=1|0` forces it.
 - **Testing:** `DUSTY_FORCE_DRY=1` forces every clean into a practice run at the engine level
   (`open --env DUSTY_FORCE_DRY=1 target/Dusty.app`). `Dusty --scan` prints a headless scan, `Dusty --bench` measures Dusty (CPU vs GPU), `DUSTY_TRACE=1` logs
