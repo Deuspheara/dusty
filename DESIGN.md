@@ -46,7 +46,7 @@ Tones, each with `base / edge / soft`:
 ### Dark mode
 
 The app follows the macOS appearance (`window.appearance()`), and switches live when System Settings changes it.
-`DUSTY_APPEARANCE=dark|light` pins it, which is handy for screenshots. Both palettes live in `ui.rs` (`LIGHT`, `DARK`):
+`DUSTY_APPEARANCE=dark|light` pins it, which is handy for screenshots. Both palettes live in `ui/theme.rs` (`LIGHT`, `DARK`):
 
 | Token | Light | Dark |
 |---|---|---|
@@ -103,12 +103,30 @@ in user defaults. The Finder icon stays purple, because changing a signed bundle
 `assets/brand/dusty-icon.svg` is the master. After editing it, run `scripts/make-icons.sh` to re-render every color,
 the 512 px PNGs embedded in the app, and `app/assets/Dusty.icns`.
 
+## Icons
+
+The app's icons are our own set (`app/assets/icons/ui/*.svg`, 48×48), chunky and flat like Dusty's buttons.
+Never use emojis in the UI: they render differently on every macOS version and clash with the set.
+
+- **Chunk**: every solid part sits on an underlay in the tone's edge color, a 3 px outline all around plus the same
+  underlay shifted 3 px down (the bottom lip). Then the flat fill on top.
+- **Highlight**: one white pill (about 55% opacity) at the top left; light always comes from the top left.
+- **Color**: one tone (base + edge, from the palette) and at most one accent tone. Inner details are 3 px strokes in
+  the edge color, or marks in the soft tint or white.
+- **Sizes**: in a soft tone tile the icon fills about 64% of it (`icon_tile`); next to text it's 16–20 px, centered on
+  the line (`icon_label`); sheet headers are 52 px and empty states 56 px. Tappable ones keep a 28 px hit target.
+- **Rendering**: `ui/icons.rs` embeds the files and draws them with `img()` (full color), never `svg()` (a one-color
+  mask). Each icon is rasterized at the size it's drawn (`icons/ui/<px>/<name>.svg`), so it stays sharp on Retina.
+
+`scripts/ui-icons/gen.py` is the source. Edit it, then run `scripts/ui-icons/make.sh` to rewrite the SVGs and an
+HTML contact sheet; add a new icon to the `icon_set!` list in `ui/icons.rs`.
+
 ## Motion
 
 - Springs over easing curves. Things pop, hop and settle.
 - The splash is under a second (badge pop, dust sweep, iris onto Dusty) and a click skips it.
 - Dusty runs at 60 fps while moving, 30 while breathing and 12 when the window isn't focused.
-- In the app, timings and spacing are named tokens in `ui.rs` (`motion::*`, `sp::*`, `radius::*`, `ts::*`):
+- In the app, timings and spacing are named tokens in `ui/theme.rs` (`motion::*`, `sp::*`, `radius::*`, `ts::*`):
   things that arrive spring in (`back_out`), bars and counters fill with an ease-out, exits are faster than entrances.
   Sizes count up and use tabular digits so they never jiggle.
 - With macOS **Reduce motion** on, the app skips the splash, confetti and slides; fades stay.

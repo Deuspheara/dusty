@@ -1,0 +1,521 @@
+# Everything Dusty can clean outside your projects. Order matters: when two items reach the same
+# folder, the earlier one keeps it.
+#
+#   id          stable: the ignore list (`id:<id>`) and the history use it
+#   label       what people see ("⚠" marks a warning in the label itself)
+#   group       build | apps | cache | junk | docker | redownload
+#   default_on  ticked in the default selection
+#   wipes_data  removes real data (emulator disks, Docker volumes…): a louder warning, never scheduled
+#   running     skip while this app runs: { app = "name shown", process = "regex on running processes" },
+#               or "each-app" for …/Application Support/<App>/… folders (guards on <App>.app)
+#   before      commands run first, only when something was found (e.g. stop the daemon holding a cache)
+#
+# Where to look, all paths relative to your home folder:
+#   paths       these files or folders
+#   contents    everything inside these folders (the folder itself stays); narrowed by
+#               exclude (names), exclude_protected (the protected-names list), files_only,
+#               older_than_days, extensions
+#   provider    a finder written in Rust (src/providers.rs) for anything a list can't express,
+#               with optional `args`; its results are added to the paths above
+
+# ───────── Xcode / iOS ─────────
+
+[[target]]
+id = "xcode-deriveddata"
+label = "Xcode DerivedData"
+group = "cache"
+default_on = true
+contents = ["Library/Developer/Xcode/DerivedData"]
+
+[[target]]
+id = "xcode-device-support"
+label = "Xcode device support files"
+group = "cache"
+default_on = true
+# copied again from the device the next time it's plugged in
+contents = [
+  "Library/Developer/Xcode/iOS DeviceSupport", "Library/Developer/Xcode/watchOS DeviceSupport", "Library/Developer/Xcode/tvOS DeviceSupport",
+  "Library/Developer/Xcode/visionOS DeviceSupport", "Library/Developer/Xcode/xrOS DeviceSupport", "Library/Developer/Xcode/macOS DeviceSupport",
+]
+
+[[target]]
+id = "sim-unavailable"
+label = "Unavailable simulators"
+group = "cache"
+default_on = true
+provider = "sim-unavailable"
+
+[[target]]
+id = "xcode-caches"
+label = "Xcode & simulator caches"
+group = "cache"
+default_on = true
+contents = ["Library/Caches/com.apple.dt.Xcode", "Library/Developer/CoreSimulator/Caches"]
+running = { app = "Xcode or Simulator", process = "/(Xcode|Simulator).app/Contents/MacOS/" }
+
+[[target]]
+id = "xcode-archives-old"
+label = "Xcode archives older than 6 months ⚠ dSYMs"
+group = "junk"
+wipes_data = true
+# each archive holds the dSYMs needed to read that build's crash logs
+provider = "xcode-old-archives"
+
+[[target]]
+id = "sim-runtimes-old"
+label = "Simulator runtimes unused for 30 days"
+group = "redownload"
+provider = "sim-runtimes-old"
+
+# ───────── Gradle / Android ─────────
+
+[[target]]
+id = "gradle-caches"
+label = "Gradle caches (keeps deps)"
+group = "cache"
+default_on = true
+contents = [".gradle/caches"]
+exclude = ["modules-2", "journal-1", "CACHEDIR.TAG"]
+paths = [".gradle/daemon", ".gradle/.tmp"]
+before = [["pkill", "-f", "org.gradle.launcher.daemon"]]
+
+[[target]]
+id = "android-cache"
+label = "Android emulator snapshots"
+group = "cache"
+default_on = true
+paths = [".android/cache"]
+provider = "avd-snapshots"
+
+[[target]]
+id = "gradle-deps"
+label = "Gradle deps & wrappers"
+group = "redownload"
+paths = [".gradle/caches/modules-2", ".gradle/wrapper/dists"]
+
+# ───────── generic caches & logs ─────────
+
+[[target]]
+id = "library-caches"
+label = "Other app caches (~/Library/Caches)"
+group = "apps"
+default_on = true
+provider = "library-caches"
+
+[[target]]
+id = "library-logs"
+label = "App logs & crash reports"
+group = "junk"
+default_on = true
+contents = ["Library/Logs"]
+exclude_protected = true
+
+[[target]]
+id = "dev-logs"
+label = "Dev tool logs (npm, old iPhone device logs)"
+group = "junk"
+default_on = true
+contents = [".npm/_logs"]
+provider = "old-device-logs"
+
+[[target]]
+id = "homebrew"
+label = "Homebrew cleanup"
+group = "cache"
+default_on = true
+provider = "homebrew"
+
+[[target]]
+id = "trash"
+label = "Trash"
+group = "junk"
+contents = [".Trash"]
+
+# ───────── package managers (cost a download) ─────────
+
+[[target]]
+id = "js-caches"
+label = "npm/pnpm/yarn/bun/deno caches"
+group = "redownload"
+paths = [
+  ".npm/_cacache", "Library/pnpm/store", ".local/share/pnpm/store", "Library/Caches/pnpm", ".yarn/berry/cache", "Library/Caches/Yarn", ".bun/install/cache",
+  "Library/Caches/deno", ".cache/node/corepack", "Library/Caches/node-gyp", ".cache/node-gyp", ".node-gyp",
+]
+
+[[target]]
+id = "pub-cache"
+label = "Dart/Flutter pub cache"
+group = "redownload"
+paths = [".pub-cache/hosted", ".pub-cache/git"]
+
+[[target]]
+id = "other-pkg"
+label = "Maven/Cargo/pip/uv/Poetry/Go/Composer caches"
+group = "redownload"
+# Poetry: only its download caches, never `virtualenvs/` (those are your project envs)
+paths = [
+  ".m2/repository", ".cargo/registry", ".cargo/git", ".cache/pip", "Library/Caches/pip", ".cache/uv", "Library/Caches/pypoetry/cache",
+  "Library/Caches/pypoetry/artifacts", "go/pkg/mod", "Library/Caches/composer", ".composer/cache", ".nuget/packages",
+]
+
+[[target]]
+id = "apple-pkg-caches"
+label = "SwiftPM/CocoaPods/Carthage caches"
+group = "redownload"
+paths = ["Library/Caches/org.swift.swiftpm", ".cache/swift-package-manager", "Library/Caches/CocoaPods", "Library/Caches/org.carthage.CarthageKit"]
+
+[[target]]
+id = "browser-runtimes"
+label = "Playwright, Puppeteer & Electron downloads"
+group = "redownload"
+paths = ["Library/Caches/ms-playwright", "Library/Caches/ms-playwright-go", ".cache/puppeteer", "Library/Caches/electron", ".cache/electron"]
+
+# ───────── dev tools ─────────
+
+[[target]]
+id = "dart-analysis"
+label = "Dart analysis server cache"
+group = "cache"
+default_on = true
+paths = [".dartServer/.analysis-driver"]
+
+[[target]]
+id = "dev-build-caches"
+label = "Compiler & linter caches (Go, Zig, ESLint, Vite, Ruff…)"
+group = "cache"
+default_on = true
+# local build/lint results only: nothing in here was downloaded
+paths = ["Library/Caches/go-build", ".cache/go-build", ".cache/zig", ".cache/eslint", ".cache/prettier", ".cache/vite", ".cache/webpack", ".cache/mypy", ".cache/ruff", ".android/build-cache"]
+
+[[target]]
+id = "jetbrains-caches"
+label = "JetBrains IDE caches & indexes (rebuilt on open)"
+group = "cache"
+# the newest folder per IDE (older versions are `old-ide-data`): like File → Invalidate Caches
+provider = "jetbrains-current"
+running = { app = "a JetBrains IDE", process = '\.app/Contents/MacOS/(idea|pycharm|webstorm|goland|clion|rustrover|rider|phpstorm|rubymine|datagrip|dataspell|aqua|fleet)( |$)' }
+
+[[target]]
+id = "electron-caches"
+label = "Desktop app caches (Electron apps)"
+group = "apps"
+default_on = true
+provider = "electron-caches"
+running = "each-app"
+
+[[target]]
+id = "vscode-cache"
+label = "VS Code cache"
+group = "apps"
+default_on = true
+provider = "editor"
+args = ["Code", "Code - Insiders"]
+running = { app = "VS Code", process = "/Visual Studio Code( - Insiders)?.app/Contents/MacOS/" }
+
+[[target]]
+id = "cursor-cache"
+label = "Cursor cache"
+group = "apps"
+default_on = true
+provider = "editor"
+args = ["Cursor"]
+running = { app = "Cursor", process = "/Cursor.app/Contents/MacOS/" }
+
+[[target]]
+id = "windsurf-cache"
+label = "Windsurf cache"
+group = "apps"
+default_on = true
+provider = "editor"
+args = ["Windsurf"]
+running = { app = "Windsurf", process = "/Windsurf.app/Contents/MacOS/" }
+
+[[target]]
+id = "old-ide-data"
+label = "Old Android Studio/JetBrains versions"
+group = "cache"
+default_on = true
+provider = "old-ide-versions"
+args = ["Library/Application Support/Google", "Library/Application Support/JetBrains", "Library/Caches/Google", "Library/Caches/JetBrains", "Library/Logs/Google"]
+
+[[target]]
+id = "codex-install-leftovers"
+label = "Codex runtime install leftovers"
+group = "cache"
+default_on = true
+provider = "codex-install-leftovers"
+
+[[target]]
+id = "esp-old-toolchains"
+label = "Old ESP-IDF toolchains (keeps newest)"
+group = "redownload"
+provider = "esp-old-toolchains"
+
+[[target]]
+id = "android-old-sdk"
+label = "Old Android NDKs & build-tools"
+group = "redownload"
+provider = "android-old-sdk"
+
+[[target]]
+id = "android-unused-images"
+label = "Android system images used by no emulator"
+group = "redownload"
+provider = "android-unused-images"
+
+[[target]]
+id = "fvm-unused"
+label = "FVM Flutter versions no project uses"
+group = "redownload"
+provider = "fvm-unused"
+
+[[target]]
+id = "rust-old-toolchains"
+label = "Pinned Rust toolchains (keeps default)"
+group = "redownload"
+provider = "rust-old-toolchains"
+
+[[target]]
+id = "zed-lsp"
+label = "Zed downloaded language servers"
+group = "redownload"
+paths = ["Library/Application Support/Zed/extensions/work"]
+
+[[target]]
+id = "avd-userdata"
+label = "Wipe Android emulator data"
+group = "redownload"
+wipes_data = true
+provider = "avd-userdata"
+before = [["pkill", "-f", "qemu-system"]]
+
+[[target]]
+id = "sim-erase"
+label = "Erase all iOS simulators' data"
+group = "redownload"
+wipes_data = true
+provider = "sim-erase"
+
+# ───────── everyday Macs (rules adapted from Mole): caches each app rebuilds ─────────
+
+[[target]]
+id = "safari-cache"
+label = "Safari cache"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/com.apple.Safari"]
+running = { app = "Safari", process = "/Safari.app/Contents/MacOS/" }
+
+[[target]]
+id = "chrome-cache"
+label = "Chrome cache"
+group = "apps"
+default_on = true
+provider = "chromium"
+args = ["Google/Chrome", "Google/Chrome"]
+running = { app = "Chrome", process = "/Google Chrome.app/Contents/MacOS/" }
+
+[[target]]
+id = "edge-cache"
+label = "Edge cache"
+group = "apps"
+default_on = true
+provider = "chromium"
+args = ["Microsoft Edge", "com.microsoft.edgemac"]
+running = { app = "Edge", process = "/Microsoft Edge.app/Contents/MacOS/" }
+
+[[target]]
+id = "brave-cache"
+label = "Brave cache"
+group = "apps"
+default_on = true
+provider = "chromium"
+args = ["BraveSoftware/Brave-Browser", "BraveSoftware/Brave-Browser"]
+running = { app = "Brave", process = "/Brave Browser.app/Contents/MacOS/" }
+
+[[target]]
+id = "arc-cache"
+label = "Arc cache"
+group = "apps"
+default_on = true
+provider = "chromium"
+args = ["Arc/User Data", "company.thebrowser.Browser"]
+running = { app = "Arc", process = "/Arc.app/Contents/MacOS/" }
+
+[[target]]
+id = "vivaldi-cache"
+label = "Vivaldi cache"
+group = "apps"
+default_on = true
+provider = "chromium"
+args = ["Vivaldi", "com.vivaldi.Vivaldi"]
+running = { app = "Vivaldi", process = "/Vivaldi.app/Contents/MacOS/" }
+
+[[target]]
+id = "firefox-cache"
+label = "Firefox cache"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/Firefox"]
+running = { app = "Firefox", process = "/Firefox.app/Contents/MacOS/" }
+
+[[target]]
+id = "discord-cache"
+label = "Discord cache"
+group = "apps"
+default_on = true
+provider = "electron-app"
+args = ["Library/Application Support/discord"]
+running = { app = "Discord", process = "/Discord.app/Contents/MacOS/" }
+
+[[target]]
+id = "slack-cache"
+label = "Slack cache"
+group = "apps"
+default_on = true
+provider = "electron-app"
+args = ["Library/Application Support/Slack", "Library/Containers/com.tinyspeck.slackmacgap/Data/Library/Application Support/Slack"]
+running = { app = "Slack", process = "/Slack.app/Contents/MacOS/" }
+
+[[target]]
+id = "zoom-cache"
+label = "Zoom cache"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/us.zoom.xos"]
+running = { app = "Zoom", process = "/zoom.us.app/Contents/MacOS/" }
+
+[[target]]
+id = "teams-cache"
+label = "Microsoft Teams cache"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/com.microsoft.teams2", "Library/Containers/com.microsoft.teams2/Data/Library/Caches"]
+running = { app = "Teams", process = '/Microsoft Teams.*\.app/Contents/MacOS/' }
+
+[[target]]
+id = "whatsapp-cache"
+label = "WhatsApp cache"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/net.whatsapp.WhatsApp"]
+running = { app = "WhatsApp", process = "/WhatsApp.app/Contents/MacOS/" }
+
+[[target]]
+id = "telegram-cache"
+label = "Telegram cache"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/ru.keepcoder.Telegram"]
+running = { app = "Telegram", process = "/Telegram.app/Contents/MacOS/" }
+
+[[target]]
+id = "figma-cache"
+label = "Figma cache"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/com.figma.Desktop"]
+running = { app = "Figma", process = "/Figma.app/Contents/MacOS/" }
+
+[[target]]
+id = "adobe-media-cache"
+label = "Adobe media cache files"
+group = "apps"
+default_on = true
+contents = ["Library/Application Support/Adobe/Common/Media Cache Files"]
+running = { app = "an Adobe video app", process = "Adobe (Premiere|After Effects|Audition|Media Encoder|Character Animator)" }
+
+[[target]]
+id = "apple-media-cache"
+label = "Music, TV & Podcasts caches"
+group = "apps"
+default_on = true
+provider = "apple-media"
+running = { app = "Music, TV or Podcasts", process = "/(Music|TV|Podcasts).app/Contents/MacOS/" }
+
+[[target]]
+id = "media-player-cache"
+label = "Video player caches (VLC, IINA, Plex)"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/org.videolan.vlc", "Library/Caches/com.colliderli.iina", "Library/Caches/tv.plex.player.desktop"]
+running = { app = "a video player", process = "/(VLC|IINA|Plex).app/Contents/MacOS/" }
+
+[[target]]
+id = "ai-app-cache"
+label = "ChatGPT & Claude app caches"
+group = "apps"
+default_on = true
+contents = ["Library/Caches/com.openai.chat", "Library/Caches/com.anthropic.claudefordesktop", "Library/Logs/Claude"]
+running = { app = "ChatGPT or Claude", process = "/(ChatGPT|Claude).app/Contents/MacOS/" }
+
+# ───────── leftovers ─────────
+
+[[target]]
+id = "incomplete-downloads"
+label = "Unfinished downloads (older than a week)"
+group = "junk"
+default_on = true
+contents = ["Downloads"]
+files_only = true
+older_than_days = 7
+extensions = [".crdownload", ".part", ".download", ".opdownload", ".partial"]
+
+[[target]]
+id = "mail-downloads"
+label = "Mail attachment copies (older than 30 days)"
+group = "junk"
+default_on = true
+contents = ["Library/Containers/com.apple.mail/Data/Library/Mail Downloads"]
+files_only = true
+older_than_days = 30
+
+[[target]]
+id = "old-installers"
+label = "Old installers in Downloads (.dmg, .pkg)"
+group = "redownload"
+contents = ["Downloads"]
+files_only = true
+older_than_days = 30
+extensions = [".dmg", ".pkg"]
+
+[[target]]
+id = "ios-updates"
+label = "iPhone & iPad update files"
+group = "redownload"
+contents = ["Library/iTunes/iPhone Software Updates", "Library/iTunes/iPad Software Updates"]
+files_only = true
+extensions = [".ipsw"]
+
+# ───────── Docker (what `docker system df` says is reclaimable) ─────────
+
+[[target]]
+id = "docker-buildcache"
+label = "Docker build cache"
+group = "docker"
+default_on = true
+provider = "docker"
+args = ["Build Cache", "builder", "prune", "-af"]
+
+[[target]]
+id = "docker-containers"
+label = "Docker stopped containers"
+group = "docker"
+default_on = true
+provider = "docker"
+args = ["Containers", "container", "prune", "-f"]
+
+[[target]]
+id = "docker-images"
+label = "Docker unused images"
+group = "docker"
+provider = "docker"
+args = ["Images", "image", "prune", "-af"]
+
+[[target]]
+id = "docker-volumes"
+label = "Docker volumes ⚠ data"
+group = "docker"
+wipes_data = true
+provider = "docker"
+args = ["Local Volumes", "volume", "prune", "-af"]

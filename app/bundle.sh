@@ -16,17 +16,17 @@ BUILD="${DUSTY_BUILD_NUMBER:-1}"
 case "$MODE" in
   debug)
     cargo build
-    BIN="target/debug/dusty" ;;
+    BIN="target/debug/dusty-app" ;;
   release)
     cargo build --release
-    BIN="target/release/dusty" ;;
+    BIN="target/release/dusty-app" ;;
   universal)
     rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null 2>&1 || true
     cargo build --release --target aarch64-apple-darwin
     cargo build --release --target x86_64-apple-darwin
     mkdir -p target/universal
     lipo -create -output target/universal/dusty \
-      target/aarch64-apple-darwin/release/dusty target/x86_64-apple-darwin/release/dusty
+      target/aarch64-apple-darwin/release/dusty-app target/x86_64-apple-darwin/release/dusty-app
     BIN="target/universal/dusty" ;;
   *) echo "usage: $0 [release|debug|universal]" >&2; exit 2 ;;
 esac

@@ -1,8 +1,7 @@
 //! Dusty: free disk space on macOS without throwing away things you'd have to re-download.
-//! Native GPUI app; the scanning/cleaning engine is a Rust port of the `dusty` CLI.
+//! Native GPUI app; scanning and cleaning live in the `dusty-core` crate, shared with the `dusty` CLI.
 
 mod dusty;
-mod engine;
 mod platform;
 mod ui;
 mod updater;
@@ -11,12 +10,17 @@ use std::borrow::Cow;
 
 use gpui::*;
 
-actions!(dusty, [Quit, CheckForUpdates, ToggleBetaUpdates, IconPurple, IconMint, IconCream]);
+actions!(dusty, [Quit, CheckForUpdates, ToggleBetaUpdates, ToggleMenuBar, IconPurple, IconMint, IconCream]);
+
+/// A menu label with a tick when `on` (padded when off, so labels line up).
+fn ticked(label: &str, on: bool) -> String {
+    if on { format!("✓ {label}") } else { format!("    {label}") }
+}
 
 /// The Dusty menu, with the current icon color ticked.
 fn menus(current: platform::IconVariant) -> Vec<Menu> {
     let item = |v: platform::IconVariant| {
-        let name = if v == current { format!("✓ {}", v.label()) } else { format!("    {}", v.label()) };
+        let name = ticked(v.label(), v == current);
         match v {
             platform::IconVariant::Purple => MenuItem::action(name, IconPurple),
             platform::IconVariant::Mint => MenuItem::action(name, IconMint),
@@ -26,12 +30,12 @@ fn menus(current: platform::IconVariant) -> Vec<Menu> {
     let mut items = Vec::new();
     if updater::available() {
         items.push(MenuItem::action("Check for Updates…", CheckForUpdates));
-        let beta = if updater::beta_enabled() { "✓ Get Beta Updates" } else { "    Get Beta Updates" };
-        items.push(MenuItem::action(beta, ToggleBetaUpdates));
+        items.push(MenuItem::action(ticked("Get Beta Updates", updater::beta_enabled()), ToggleBetaUpdates));
         items.push(MenuItem::separator());
     }
     items.extend([
         MenuItem::submenu(Menu { name: "App Icon".into(), items: platform::IconVariant::ALL.into_iter().map(item).collect() }),
+        MenuItem::action(ticked("Show in Menu Bar", platform::menu_bar_enabled()), ToggleMenuBar),
         MenuItem::separator(),
         MenuItem::action("Quit Dusty", Quit),
     ]);
@@ -45,21 +49,18 @@ fn set_icon(v: platform::IconVariant, cx: &mut App) {
 
 pub static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
+/// `DUSTY_TRACE=1`: print frame timings (read once; render paths check it every frame).
+pub fn tracing() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("DUSTY_TRACE").is_some())
+}
+
 fn main() {
     START.get_or_init(std::time::Instant::now);
-    engine::fix_path();
-    // headless mode for checking the engine against the CLI: `Dusty --scan`
-    if std::env::args().any(|a| a == "--scan") {
-        let progress = std::sync::Arc::new(std::sync::Mutex::new(engine::ScanProgress::default()));
-        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let opts = engine::ScanOptions { roots: engine::default_roots(), keep_recent_days: 0, min_size_mb: 1 };
-        let t0 = std::time::Instant::now();
-        let targets = engine::scan_all(&opts, progress, cancel);
-        for t in &targets {
-            println!("{:?}\t{}\t{}\t{}", t.group, t.default_on, t.bytes, t.label);
-        }
-        eprintln!("{} items in {:.1}s", targets.len(), t0.elapsed().as_secs_f32());
-        return;
+    dusty_core::fix_path();
+    // the weekly LaunchAgent runs `Dusty --scheduled-clean`: clean the safe picks headless, then exit
+    if std::env::args().any(|a| a == dusty_core::schedule::SCHEDULED_CLEAN_FLAG) {
+        std::process::exit(dusty_core::schedule::run_scheduled_clean_main(std::env::args()));
     }
     // headless benchmark: `Dusty --bench` (rig build + per-frame compose cost)
     if std::env::args().any(|a| a == "--bench") {
@@ -142,11 +143,12 @@ fn main() {
         let _ = dusty::rig();
     });
 
-    Application::new().run(|cx: &mut App| {
+    Application::new().with_assets(ui::icons::Assets).run(|cx: &mut App| {
         if let Ok(font) = std::fs::read("/System/Library/Fonts/SFNSRounded.ttf") {
             let _ = cx.text_system().add_fonts(vec![Cow::Owned(font)]);
         }
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("cmd-w", Quit, None)]);
+        ui::bind_keys(cx);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &CheckForUpdates, _| updater::check_now());
         cx.on_action(|_: &ToggleBetaUpdates, cx| {
@@ -154,6 +156,13 @@ fn main() {
             cx.set_menus(menus(platform::saved_icon()));
         });
         updater::start();
+        cx.on_action(|_: &ToggleMenuBar, cx| {
+            let on = !platform::menu_bar_enabled();
+            platform::set_menu_bar_enabled(on);
+            platform::status_item_show(on);
+            ui::refresh_status_title();
+            cx.set_menus(menus(platform::saved_icon()));
+        });
         cx.on_action(|_: &IconPurple, cx| set_icon(platform::IconVariant::Purple, cx));
         cx.on_action(|_: &IconMint, cx| set_icon(platform::IconVariant::Mint, cx));
         cx.on_action(|_: &IconCream, cx| set_icon(platform::IconVariant::Cream, cx));
@@ -162,6 +171,9 @@ fn main() {
             platform::apply_icon(icon, false);
         }
         cx.set_menus(menus(icon));
+        // the 🐾 free-space item in the menu bar (Dusty → Show in Menu Bar turns it off)
+        platform::status_item_show(platform::menu_bar_enabled());
+        ui::refresh_status_title();
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();
@@ -186,7 +198,7 @@ fn main() {
 }
 
 /// CPU time used by this process so far (seconds): user + system.
-#[allow(dead_code)]
+#[cfg(target_os = "macos")]
 fn cpu_time() -> f64 {
     let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
     unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) };

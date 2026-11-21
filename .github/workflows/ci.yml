@@ -42,20 +42,6 @@ jobs:
       # fails on known vulnerabilities; "unmaintained" notices (all deep in GPUI's tree) stay warnings
       - run: cargo audit --file app/Cargo.lock
 
-  audit-npm:
-    name: npm advisories
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-      - run: npm ci --ignore-scripts
-      - run: npm audit --audit-level=moderate
-      # registry signatures + provenance of every installed package
-      - run: npm audit signatures
 
   workflows:
     name: Workflow security (zizmor)
@@ -98,7 +84,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: app
-      - run: cargo test --release
+      - run: cargo test --release --workspace
+      - run: cargo run --release -p dusty-cli -- --help
       - run: ../scripts/fetch-sparkle.sh
       - name: Bundle (with Sparkle, ad-hoc signed)
         run: ./bundle.sh
@@ -115,19 +102,3 @@ jobs:
           name: Dusty-app-${{ github.sha }}
           path: app/target/Dusty.app
           retention-days: 7
-
-  cli:
-    name: CLI (TypeScript)
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run build
-      - run: node dist/index.js --help

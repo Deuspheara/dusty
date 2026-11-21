@@ -43,6 +43,7 @@ pub enum Mood {
     Think,
     Squish,
     Sleepy,
+    #[allow(dead_code)] // drawn and animated, not used by a flow yet
     Melt,
     Hungry,
 }
@@ -229,10 +230,6 @@ impl State {
             || self.ear_l.v.abs() > 0.3
             || self.ear_r.v.abs() > 0.3
             || self.blink > 0.
-    }
-
-    pub fn mood(&self) -> Mood {
-        self.mood
     }
 
     /// Change mood; `secs` returns to idle afterwards.
@@ -674,7 +671,7 @@ fn dirt(cv: &mut dyn Painter, m: Affine, k: f32, head: bool, t: f32) {
 fn trace_frame(cost: std::time::Duration, active: bool, lively: bool) {
     use std::sync::Mutex;
     static STATS: Mutex<Option<(Instant, u32, f64, bool, bool)>> = Mutex::new(None);
-    if std::env::var_os("DUSTY_TRACE").is_none() {
+    if !crate::tracing() {
         return;
     }
     let mut g = STATS.lock().unwrap();
@@ -712,6 +709,9 @@ impl Dusty {
     }
     pub fn set_size(&mut self, size: f32) {
         self.size = size;
+    }
+    pub fn size(&self) -> f32 {
+        self.size
     }
     /// Centre of the rendered square in window coordinates.
     pub fn center(&self) -> Option<Point<Pixels>> {
@@ -810,7 +810,7 @@ impl Render for Dusty {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, e: &MouseDownEvent, _, cx| {
-                    let side = this.bounds.get().map(|b| f32::from((e.position.x - b.center().x) / (b.size.width / 2.))).unwrap_or(0.);
+                    let side = this.bounds.get().map(|b| (e.position.x - b.center().x) / (b.size.width / 2.)).unwrap_or(0.);
                     this.st.poke(side);
                     cx.notify();
                 }),

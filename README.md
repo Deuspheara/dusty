@@ -63,6 +63,20 @@ keeps following betas, and **Dusty → Get Beta Updates** switches any copy over
 Projects are looked for in `~/Documents`, `~/Developer`, `~/Projects` and the worktree folders that coding agents
 use (`~/.codex/worktrees`, `~/.claude/worktrees`, `~/conductor/workspaces`…).
 
+## More tools
+
+Under **Start checkup** on the home screen:
+
+- 🧺 **Uninstall apps**: your apps biggest first (type to search), and the files each one leaves in `~/Library`.
+  Matching is strict, anything that may hold real data starts unticked, and Apple's apps and open apps are left alone.
+- 🐘 **Big & old files**: large or long-unopened files in Downloads, Desktop, Movies and Documents. Nothing is ticked.
+- 🗺️ **What's using space**: a map of your home folder, biggest blocks first. Tap a block to look inside. Read-only.
+- 🕰️ **History**: every clean, uninstall and big-file trip, with **Put back** for whatever is still in the Trash.
+- ⚙️ **Settings**: a weekly safe clean (Sundays 11:00), the menu bar item, practice runs and your ignore list.
+
+When the app cleans, caches and build output are deleted, so the space comes back right away. Logs and anything
+re-downloadable go to the Trash instead, and the summary says how much is waiting there.
+
 ## House rules
 
 A cleaner you can't trust is worse than a full disk. Before anything is deleted:
@@ -98,21 +112,47 @@ Secret Stuff                    # a bare name: any file or folder called that, a
 id:docker-images                # hide a whole item (ids are in `dusty scan --json`)
 ```
 
+**Your own project types and folders** go in `~/.config/dusty/catalog.toml`, in the same format as the built-in
+catalog ([`projects.toml`](app/crates/dusty-core/catalog/projects.toml), [`system.toml`](app/crates/dusty-core/catalog/system.toml)).
+They come after the built-in ones, so they can only add: a folder a built-in item already covers stays with it, and a
+user file can't run commands. If the file has a mistake, it's left out and Dusty says why.
+
+```toml
+# ~/.config/dusty/catalog.toml
+[[rule]]                         # Unreal's Intermediate/ folder, next to a .uproject
+dir = "Intermediate"
+markers = ["*.uproject"]
+kind = "Unreal intermediate"
+
+[[target]]                       # a tool's cache in your home folder
+id = "mytool-cache"
+label = "MyTool cache"
+group = "cache"
+default_on = true
+contents = [".mytool/cache"]
+```
+
 The safety approach was inspired by [Mole](https://github.com/tw93/Mole) and reimplemented from scratch in Rust; no
 Mole code is included.
 
 ## The CLI
 
-Same engine, same rules, in a terminal. Needs Node 20+.
+Same engine, same rules, in a terminal: a small Rust binary built on the app's engine (`app/crates/dusty-core`).
 
 ```bash
-npm install && npm run build && npm link   # installs the `dusty` command
+cargo install --path app/crates/dusty-cli   # installs the `dusty` command
 dusty scan                 # report only
 dusty                      # interactive: pick, confirm, delete
 dusty --dry-run --yes      # what the default selection would remove
 dusty --yes                # non-interactive, default selection (good for a cron)
 dusty -k 3                 # keep artifacts of projects touched in the last 3 days
 dusty -r ~/Code ~/Work     # scan these roots instead
+dusty --trash              # move to the Trash instead of deleting
+dusty history              # past cleans; `dusty put-back <id>` undoes a trashed one
+dusty large                # review big / long-unused files (nothing preselected, picks go to the Trash)
+dusty schedule on          # weekly safe clean (off | status)
+dusty clean --json -n      # the plan as JSON, touching nothing (for scripts and agents)
+dusty clean --json -y      # clean the default selection, print the plan and the report
 ```
 
 ## Build from source
@@ -135,7 +175,7 @@ scripts/release.sh 0.2.0          # stable
 scripts/release.sh 0.2.0-beta.1   # beta: a GitHub pre-release, offered only to beta users
 ```
 
-That bumps the version in `app/Cargo.toml`, `package.json` and the CLI, commits, tags and pushes. The
+That bumps the version in `app/Cargo.toml` (the app, the engine and the CLI share it), commits, tags and pushes. The
 [Release workflow](.github/workflows/release.yml) then:
 
 1. tests and builds a universal `Dusty.app` from scratch (no build cache), with [Sparkle](https://sparkle-project.org)
@@ -151,7 +191,7 @@ It needs seven repository secrets (the Developer ID certificate, the notarizatio
 the list is at the top of the build job). A release stops at its first step if one is missing.
 
 Every push and pull request runs the tests and builds, plus security checks: [gitleaks](https://github.com/gitleaks/gitleaks)
-for secrets, `cargo audit` and `npm audit` (with registry signatures) for vulnerable dependencies,
+for secrets, `cargo audit` for vulnerable dependencies,
 [zizmor](https://docs.zizmor.sh) for workflow security, dependency review on pull requests and CodeQL. Actions are
 pinned to commit hashes and kept fresh by Dependabot. Run the same secret scan locally before you commit:
 
