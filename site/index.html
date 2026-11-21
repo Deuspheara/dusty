@@ -2,402 +2,703 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dusty: a tidy Mac, one crumb at a time</title>
-<meta name="description" content="Dusty is a small macOS app that finds build folders, dev caches and app junk, and clears them without touching anything you'd have to download again.">
+<meta name="description" content="Dusty is a free, open-source macOS disk cleaner that eats build folders and caches, and never your code.">
 <meta property="og:title" content="Dusty: a tidy Mac, one crumb at a time">
 <meta property="og:description" content="A playful macOS disk cleaner. Build folders, dev caches, app junk. Never your code.">
 <meta property="og:image" content="https://deuspheara.github.io/dusty/img/og.png">
 <link rel="icon" href="img/icon.png" type="image/png">
 <link rel="apple-touch-icon" href="img/icon.png">
+<script>document.documentElement.classList.add('js')</script>
 <style>
   :root {
-    --bg: #17112B;
-    --bg-2: #1F1738;
-    --surface: #251C44;
-    --line: #3A2F63;
-    --ink: #F7F2FF;
-    --muted: #B6ACD9;
-    --cream: #FFFBF5;
-    --grape: #8B6EFF;
-    --grape-edge: #5B3FD9;
-    --mint: #22C993;
-    --coral: #FF5A6E;
-    --sun: #FFC83D;
-    --sky: #3DB8FF;
-    --blue: #5B8DEF;
-    --teal: #2EC4B6;
+    --grape: #7C5CFF; --grape-edge: #5B3FD9; --grape-soft: #EFEBFF;
+    --mint: #22C993; --mint-edge: #169E72; --mint-soft: #DDF7EC;
+    --coral: #FF5A6E; --coral-edge: #D63D52;
+    --sun: #FFC83D; --sky: #3DB8FF; --teal: #2EC4B6; --blue: #5B8DEF;
+    --ink: #2B2340; --muted: #8A84A3; --text-soft: #6B6585;
+    --bg: #FFFFFF; --cream: #FFFBF5;
+    --line: #ECE8F5; --line-2: #E1DBF0; --stuff: #CBC5DB; --track: #F3F0FA;
+    --card: #FFFFFF; --pill: #ECE7F5; --alert-line: #F6DDE2; --faint: #B1ABC6; --stuff-ink: #6F6888; --mint-line: #B5EBD5;
+    --seg-gap: rgba(255,255,255,.75); --shadow: rgba(43,35,64,.08);
+    --grape-text: #7C5CFF; --mint-text: #169E72; --coral-text: #FF5A6E;
+    color-scheme: light dark;
     --round: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
-    --text: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --spring: cubic-bezier(.34, 1.56, .64, 1);
   }
   * { box-sizing: border-box; }
-  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
-  .skip { position: absolute; left: 12px; top: -60px; z-index: 10; background: var(--sun); color: #1A1430; padding: 10px 16px; border-radius: 10px; font-weight: 800; }
-  .skip:focus { top: 12px; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 17px/1.6 var(--text); -webkit-font-smoothing: antialiased; overflow-x: hidden;
-  }
-  a { color: inherit; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 500 17px/1.5 var(--round); overflow-x: hidden; -webkit-font-smoothing: antialiased; }
   img { display: block; max-width: 100%; height: auto; }
-  .wrap { width: min(1120px, 100% - 40px); margin-inline: auto; }
-  :focus-visible { outline: 3px solid var(--sun); outline-offset: 3px; border-radius: 8px; }
+  a { color: inherit; }
+  h1, h2, h3 { font-weight: 900; line-height: 1.05; margin: 0; letter-spacing: -.02em; }
+  :focus-visible { outline: 3px solid var(--sky); outline-offset: 3px; border-radius: 10px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-  /* drifting dust, behind everything */
-  .dust { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
-  .dust i {
-    position: absolute; border-radius: 50%; background: var(--muted); opacity: .18;
-    animation: drift linear infinite;
+  /* ---------- buttons ---------- */
+  .btn { --c: var(--mint); --e: var(--mint-edge); display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    font: 900 17px/1 var(--round); color: #fff; text-decoration: none; background: var(--c); border: 0; border-radius: 16px;
+    padding: 14px 22px; box-shadow: 0 5px 0 var(--e); transform: translateY(0); cursor: pointer; white-space: nowrap;
+    transition: transform .08s ease, box-shadow .08s ease, filter .15s ease; letter-spacing: .01em; }
+  .btn:hover { filter: brightness(1.06); }
+  .btn:active { transform: translateY(5px); box-shadow: 0 0 0 var(--e); }
+  .btn svg { width: 1.1em; height: 1.1em; flex: none; }
+  .btn-sm { font-size: 15px; padding: 10px 16px; border-radius: 14px; box-shadow: 0 4px 0 var(--e); }
+  .btn-sm:active { transform: translateY(4px); }
+  .btn-lg { font-size: clamp(17px, 2.3vh, 21px); padding: 17px 28px; border-radius: 18px; box-shadow: 0 6px 0 var(--e); }
+  .btn-lg:active { transform: translateY(6px); }
+  .btn-ghost { --e: var(--line-2); background: var(--card); color: var(--ink); box-shadow: 0 5px 0 var(--line-2), inset 0 0 0 2px var(--line-2); }
+  .btn-ghost:active { box-shadow: 0 0 0 var(--line-2), inset 0 0 0 2px var(--line-2); }
+
+  /* ---------- header ---------- */
+  .site-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: min(1100px, 100%); margin: 0 auto; padding: 12px 16px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 900; font-size: 22px; letter-spacing: -.01em; }
+  .brand img { width: 38px; height: 38px; border-radius: 10px; }
+
+  /* ---------- story stage ---------- */
+  .story { position: relative; background: var(--cream); }
+  .js .story { height: 540vh; }
+  .stage { position: relative; display: grid; grid-template-rows: auto auto auto 1fr; justify-items: center;
+    padding: 14px 16px 0; background: var(--cream); overflow: hidden; }
+  .js .stage { position: sticky; top: 0; height: 100vh; height: 100svh; }
+  .stage > * { width: min(1000px, 100%); }
+
+  .stage-top { display: flex; align-items: center; gap: 16px; }
+  .pill { flex: 1; height: 16px; border-radius: 99px; background: var(--pill); position: relative; overflow: hidden; }
+  .pill-fill { position: absolute; inset: 0 auto 0 0; width: 100%; border-radius: 99px; background: var(--mint); transform-origin: left; transform: scaleX(1); }
+  .pill-fill::after { content: ""; position: absolute; left: 8px; right: 8px; top: 3px; height: 4px; border-radius: 99px; background: rgba(255,255,255,.4); }
+  .skip { font-weight: 800; font-size: 14px; color: var(--grape-text); text-decoration: none; white-space: nowrap; padding: 4px 2px; }
+  .skip:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  .copy { text-align: center; margin-top: clamp(6px, 2.6vh, 30px); }
+  .kicker { height: 46px; display: grid; place-items: center; }
+  .kicker > * { grid-area: 1 / 1; }
+  .alert { display: inline-flex; align-items: center; gap: 10px; background: var(--card); border: 2px solid var(--alert-line); border-radius: 16px;
+    padding: 6px 14px 6px 8px; box-shadow: 0 4px 0 var(--alert-line); font-weight: 800; font-size: 15px; text-align: left; line-height: 1.2; }
+  .alert-ico { width: 28px; height: 28px; border-radius: 9px; background: var(--coral); display: grid; place-items: center; flex: none; }
+  .alert small { display: block; color: var(--muted); font-weight: 700; font-size: 12px; }
+  .js .stage[data-beat="0"] .alert { animation: buzz 2.8s ease-in-out infinite; }
+  .tagchip { display: inline-flex; align-items: center; gap: 8px; background: var(--card); border: 2px solid var(--line); border-radius: 99px; padding: 5px 14px 5px 6px;
+    font-weight: 900; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--grape-text); }
+  .tagchip i { width: 22px; height: 22px; border-radius: 99px; background: var(--grape); color: #fff; display: grid; place-items: center; font-style: normal; font-size: 12px; letter-spacing: 0; }
+  .stage[data-beat="0"] .tagchip, .stage:not([data-beat="0"]) .alert { display: none; }
+
+  .headline { font-size: clamp(30px, min(8.2vw, 8vh), 80px); line-height: 1.02; margin: 6px auto 0; min-height: 2.06em; max-width: 15em;
+    display: grid; place-items: center; text-wrap: balance; }
+  .headline .hot { color: var(--coral-text); display: inline-block; }
+  .js .stage[data-beat="0"] .headline .hot { animation: wiggle 2.4s ease-in-out infinite; transform-origin: 50% 70%; }
+  .headline .w { display: inline-block; }
+
+  .meta { height: clamp(66px, 12vh, 104px); display: grid; place-items: center; margin-top: 4px; }
+  .meta > * { grid-area: 1 / 1; opacity: 0; visibility: hidden; transform: translateY(8px) scale(.96); transition: opacity .25s, transform .4s var(--spring), visibility 0s .25s; }
+  .meta > .show { opacity: 1; visibility: visible; transform: none; transition: opacity .25s, transform .45s var(--spring), visibility 0s; }
+  .sub { margin: 0; color: var(--text-soft); font-weight: 700; font-size: clamp(16px, 2.3vh, 20px); max-width: 30em; padding: 0 8px; }
+  .counter { margin: 0; display: inline-flex; align-items: baseline; gap: 10px; }
+  .counter .num { font-weight: 900; font-size: clamp(36px, 7vh, 64px); color: var(--grape-text); font-variant-numeric: tabular-nums; letter-spacing: -.02em; line-height: 1; }
+  .counter .unit { font-weight: 900; font-size: clamp(20px, 3.2vh, 30px); color: var(--grape-text); }
+  .counter .clabel { font-weight: 800; font-size: clamp(16px, 2.4vh, 22px); color: var(--muted); }
+  .stage[data-beat="4"] .counter .num, .stage[data-beat="4"] .counter .unit { color: var(--mint-text); }
+  .cta { display: grid; justify-items: center; gap: 12px; }
+  .fine { margin: 0; font-size: 13px; font-weight: 700; color: var(--muted); }
+
+  /* disk bar */
+  .disk { margin-top: clamp(4px, 2vh, 22px); }
+  .disk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-weight: 800; font-size: 14px; color: var(--muted); margin: 0 4px 8px; }
+  .disk-head .free { color: var(--coral-text); font-variant-numeric: tabular-nums; transition: color .4s; }
+  .stage[data-beat="4"] .disk-head .free, .stage[data-beat="5"] .disk-head .free { color: var(--mint-text); }
+  .zoomnote { font-weight: 700; color: var(--faint); opacity: 0; transition: opacity .3s; }
+  .barwrap { position: relative; }
+  .bar { display: flex; height: clamp(46px, 8vh, 78px); border-radius: 20px; background: var(--track); border: 2px solid var(--line-2);
+    box-shadow: 0 5px 0 var(--line-2); overflow: hidden; }
+  .seg { position: relative; flex: none; height: 100%; overflow: hidden; box-shadow: inset -2px 0 0 var(--seg-gap); transition: background-color .5s ease; }
+  .seg::after { content: ""; position: absolute; left: 7px; right: 7px; top: 18%; height: 12%; min-height: 4px; border-radius: 99px; background: rgba(255,255,255,.32); }
+  .seg.free { box-shadow: none; } .seg.free::after { display: none; }
+  .seg.stuff { background-color: var(--stuff); }
+  .seg.redl { background-color: var(--grape); background-image: repeating-linear-gradient(135deg, transparent 0 9px, rgba(255,255,255,.18) 9px 18px); }
+  .seg.build { background-color: var(--coral); }
+  .seg.dev { background-color: var(--sun); }
+  .seg.app { background-color: var(--sky); }
+  .seg.freed { background-color: var(--mint); }
+  .seg.free { background-color: var(--track); transition: background-color .6s ease; }
+  .stage[data-beat="5"] .seg.free { background-color: var(--mint-soft); }
+  .stage[data-beat="0"] .seg.used { background-color: var(--coral); background-image: none; box-shadow: none; }
+  .stage[data-beat="0"] .seg.used::after { left: 0; right: 0; border-radius: 0; }
+  .seg .lbl { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #fff; font-weight: 900; font-size: 13px; white-space: nowrap; z-index: 1; transition: opacity .3s; }
+  .seg.stuff .lbl { color: var(--stuff-ink); }
+  .seg .brk { position: absolute; right: 18%; top: -2px; height: calc(100% + 4px); width: 14px; opacity: 0; }
+  .badges { position: absolute; inset: 0; pointer-events: none; }
+  .badge { position: absolute; top: -13px; width: 26px; height: 26px; margin-left: -13px; border-radius: 99px; background: var(--mint); border: 3px solid var(--card);
+    display: grid; place-items: center; box-shadow: 0 3px 0 var(--mint-edge); opacity: 0; transform: scale(.3); transition: opacity .2s, transform .45s var(--spring); }
+  .badge.on { opacity: 1; transform: scale(1); }
+  .badge svg { width: 13px; height: 13px; }
+
+  .legend { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .legend li { display: inline-flex; align-items: center; gap: 7px; background: var(--card); border: 2px solid var(--line); border-radius: 12px; padding: 5px 10px;
+    font-weight: 800; font-size: 14px; line-height: 1.2; opacity: 0; transform: translateY(10px) scale(.9);
+    transition: opacity .25s, transform .45s var(--spring), background-color .3s, border-color .3s; }
+  .legend li b { color: var(--muted); font-weight: 800; font-variant-numeric: tabular-nums; }
+  .legend .sw { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+  .legend .tag { display: none; }
+  .stage.zoomed .legend li { opacity: 1; transform: none; }
+  .stage.zoomed .legend li:nth-child(2) { transition-delay: .05s; } .stage.zoomed .legend li:nth-child(3) { transition-delay: .1s; }
+  .stage.zoomed .legend li:nth-child(4) { transition-delay: .15s; } .stage.zoomed .legend li:nth-child(5) { transition-delay: .2s; }
+  .stage.zoomed .zoomnote { opacity: 1; }
+  .stage.judged .legend .tag { display: inline-flex; animation: pop .45s var(--spring) both; }
+  .tag.ok { width: 20px; height: 20px; border-radius: 99px; background: var(--mint); place-items: center; align-items: center; justify-content: center; }
+  .tag.ok svg { width: 11px; height: 11px; }
+  .tag.ask { background: var(--grape-soft); color: var(--grape-text); border-radius: 99px; padding: 2px 8px; font-size: 13px; font-weight: 900; }
+  .tag.keep { gap: 4px; align-items: center; color: var(--text-soft); font-size: 13px; font-weight: 900; }
+  .tag.keep svg { width: 12px; height: 12px; }
+  .legend li.done { background: var(--mint-soft); border-color: var(--mint-line); }
+
+  /* pet */
+  .pet { --dw: clamp(112px, 25vh, 232px); align-self: end; display: flex; align-items: flex-end; justify-content: center; gap: clamp(10px, 2vw, 26px);
+    padding-bottom: clamp(10px, 2.6vh, 28px); position: relative; }
+  .dusty { width: var(--dw); aspect-ratio: 288 / 247; position: relative; flex: none; will-change: transform; z-index: 2; }
+  .dusty-bob, .dusty-shake, .dusty-body { position: absolute; inset: 0; }
+  .dusty-body { transform-origin: 50% 100%; }
+  .js .dusty-bob { animation: bob 2.6s ease-in-out infinite; }
+  .dusty.refuse .dusty-shake { animation: nope .55s ease-in-out infinite; transform-origin: 40% 80%; }
+  .dusty img { position: absolute; left: 0; bottom: 0; width: 100%; opacity: 0; }
+  .dusty img.on { opacity: 1; }
+  .dusty .shadow { position: absolute; left: 8%; right: 22%; bottom: -6px; height: 14px; border-radius: 50%; background: var(--shadow); }
+  .bubble { position: relative; text-wrap: pretty; margin: 0 0 calc(var(--dw) * .42); background: var(--card); border: 2px solid var(--line); border-radius: 20px; padding: 12px 16px;
+    font-weight: 800; font-size: clamp(15px, 2.1vh, 19px); line-height: 1.3; max-width: 330px; min-width: 0; box-shadow: 0 4px 0 var(--line);
+    transform-origin: 0 100%; transition: opacity .3s, transform .45s var(--spring); }
+  .bubble::before { content: ""; position: absolute; left: -9px; bottom: 18px; width: 14px; height: 14px; background: var(--card); border-left: 2px solid var(--line); border-bottom: 2px solid var(--line); transform: rotate(45deg); border-bottom-left-radius: 4px; }
+  .bubble:empty { visibility: hidden; }
+
+  /* fx layer */
+  .fx { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
+  .blk { position: absolute; left: 0; top: 0; border-radius: 10px; box-shadow: inset 0 -5px 0 rgba(0,0,0,.14), inset 0 4px 0 rgba(255,255,255,.3); display: none; will-change: transform; }
+  .chip { position: absolute; left: 0; top: 0; display: none; will-change: transform; }
+  .chip-in { position: relative; display: inline-flex; align-items: center; gap: 7px; background: var(--card); border: 2px solid var(--line-2); border-radius: 12px; padding: 8px 12px;
+    font: 800 16px/1 var(--mono); color: var(--ink); box-shadow: 0 4px 0 var(--line-2); }
+  .chip-in .code { color: var(--grape-text); font-weight: 900; }
+  .chip.nope .chip-in { animation: jitter .35s ease-in-out infinite; }
+  .chip .stop, .chip .lock { position: absolute; top: -12px; right: -12px; width: 26px; height: 26px; border-radius: 99px; border: 3px solid var(--card); display: grid; place-items: center; transform: scale(0); transition: transform .35s var(--spring); }
+  .chip .stop { background: var(--coral); box-shadow: 0 3px 0 var(--coral-edge); }
+  .chip .lock { background: var(--mint); box-shadow: 0 3px 0 var(--mint-edge); }
+  .chip.nope .stop, .chip.safe .lock { transform: scale(1); }
+  .chip .stop svg, .chip .lock svg { width: 12px; height: 12px; }
+  .puff { position: absolute; left: 0; top: 0; background: var(--card); border: 2px solid var(--line); border-radius: 99px; padding: 5px 12px; font-weight: 900; font-size: 17px; color: var(--grape-text); white-space: nowrap; box-shadow: 0 3px 0 var(--line); }
+  .crumb, .confetti { position: absolute; left: 0; top: 0; border-radius: 3px; }
+
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+  @keyframes nope { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-6deg); } 75% { transform: rotate(6deg); } }
+  @keyframes jitter { 0%, 100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-3px) rotate(-3deg); } 75% { transform: translateX(3px) rotate(3deg); } }
+  @keyframes buzz { 0%, 70%, 100% { transform: translateX(0) rotate(0); } 74% { transform: translateX(-5px) rotate(-2deg); } 78% { transform: translateX(5px) rotate(2deg); } 82% { transform: translateX(-4px) rotate(-1deg); } 86% { transform: translateX(3px); } 90% { transform: translateX(-1px); } }
+  @keyframes wiggle { 0%, 60%, 100% { transform: rotate(0) scale(1); } 66% { transform: rotate(-5deg) scale(1.06); } 74% { transform: rotate(4deg) scale(1.06); } 82% { transform: rotate(-2deg); } }
+  @keyframes pop { from { transform: scale(.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  /* ---------- after the story ---------- */
+  .section { width: min(1040px, 100%); margin: 0 auto; padding: clamp(64px, 10vw, 120px) 16px; }
+  .eyebrow { font-weight: 900; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--grape-text); margin: 0 0 10px; }
+  .h2 { font-size: clamp(34px, 6vw, 56px); }
+  .rules { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: clamp(32px, 6vw, 72px); align-items: center; }
+  .rules-art { margin-top: 28px; width: min(260px, 70%); }
+  .rule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+  .rule-list li { display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start; background: var(--card); border: 2px solid var(--line); border-radius: 18px; padding: 16px 18px; }
+  .check { width: 36px; height: 36px; border-radius: 12px; background: var(--mint); box-shadow: 0 4px 0 var(--mint-edge); display: grid; place-items: center; }
+  .check svg { width: 18px; height: 18px; }
+  .rule-list strong { display: block; font-weight: 900; font-size: 18px; line-height: 1.25; }
+  .rule-list span { display: block; color: var(--text-soft); font-weight: 600; font-size: 15px; margin-top: 3px; }
+  .rule-list code { font: 700 .9em var(--mono); background: var(--track); border-radius: 6px; padding: 1px 5px; }
+
+  .shots-sec { background: var(--cream); }
+  .shots-head { text-align: center; margin-bottom: clamp(28px, 5vw, 48px); }
+  .shots-head .h2 span { color: var(--line-2); }
+  .shots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(10px, 3vw, 32px); max-width: 780px; margin: 0 auto; list-style: none; padding: 0; }
+  .shots figure { margin: 0; text-align: center; }
+  .shots img { width: 100%; border-radius: clamp(12px, 2vw, 20px); border: 2px solid var(--line); background: var(--card); box-shadow: 0 6px 0 var(--line); }
+  .shots figcaption { margin-top: 16px; }
+  .shots figcaption b { display: block; font-weight: 900; font-size: clamp(17px, 2.4vw, 22px); }
+  .shots figcaption span { display: block; color: var(--text-soft); font-weight: 600; font-size: clamp(13px, 1.6vw, 15px); line-height: 1.35; margin-top: 2px; }
+  .n1 { color: var(--coral-text); } .n2 { color: var(--grape-text); } .n3 { color: var(--mint-text); }
+
+  .final { text-align: center; }
+  .final-card { background: var(--cream); border: 2px solid var(--line); border-radius: 28px; padding: clamp(36px, 6vw, 64px) 20px; display: grid; justify-items: center; }
+  .final-card img { width: clamp(150px, 22vw, 220px); margin-bottom: 12px; }
+  .js .final-card img { animation: bob 2.6s ease-in-out infinite; }
+  .final-card p.lede { margin: 14px 0 28px; color: var(--text-soft); font-weight: 700; font-size: clamp(16px, 2vw, 19px); max-width: 30em; }
+  .final-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 16px; }
+  .final .fine { margin-top: 22px; }
+  footer { width: min(1040px, 100%); margin: 0 auto; padding: 8px 16px 48px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; color: var(--muted); font-weight: 700; font-size: 14px; }
+  footer nav { display: flex; gap: 18px; }
+  footer a { text-decoration: none; } footer a:hover { color: var(--ink); }
+
+  @media (max-width: 760px) {
+    .rules { grid-template-columns: 1fr; }
+    .rules-art { display: none; }
+    .legend { gap: 6px; margin-top: 14px; }
+    .legend li { font-size: 12px; padding: 4px 6px; gap: 5px; white-space: nowrap; }
+    .legend .sw { width: 10px; height: 10px; }
+    .stage.judged .legend .tag.ok { display: none; }
+    .legend li[data-k="stuff"] { order: 4; } .legend li[data-k="redl"] { order: 5; }
+    .tag.ask { font-size: 12px; } .tag.keep { font-size: 11px; }
+    .legend { gap: 5px; }
+    .disk-head { margin-bottom: 16px; }
+    .disk-head { font-size: 13px; }
+    .bubble { max-width: 230px; padding: 10px 13px; border-radius: 16px; }
+    .skip { font-size: 13px; }
   }
-  @keyframes drift { from { transform: translate(0, 0); } to { transform: translate(-60px, -110vh); } }
-  main, header, footer { position: relative; z-index: 1; }
-
-  /* nav */
-  header .wrap { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
-  .brand { display: flex; align-items: center; gap: 10px; font: 900 22px var(--round); text-decoration: none; }
-  .brand img { width: 40px; height: 40px; }
-  nav { display: flex; gap: 26px; font-weight: 600; color: var(--muted); }
-  nav a { text-decoration: none; }
-  nav a:hover { color: var(--ink); }
-
-  /* chunky buttons, same shape as in the app */
-  .btn {
-    display: inline-flex; align-items: center; gap: 10px; padding: 15px 26px; border-radius: 16px;
-    font: 800 16px var(--round); letter-spacing: .02em; text-decoration: none; text-transform: uppercase;
-    transition: transform .12s ease, box-shadow .12s ease;
-  }
-  .btn-primary { background: var(--grape); color: #fff; box-shadow: 0 5px 0 var(--grape-edge); }
-  .btn-ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--line), 0 5px 0 var(--line); }
-  .btn:hover { transform: translateY(-2px); }
-  .btn-primary:hover { box-shadow: 0 7px 0 var(--grape-edge); }
-  .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--grape-edge); }
-
-  /* hero */
-  .hero { display: grid; grid-template-columns: 1.1fr .9fr; gap: 56px; align-items: center; padding: 20px 0 30px; }
-  .eyebrow { display: inline-flex; gap: 8px; align-items: center; color: var(--mint); font-weight: 700; font-size: 15px; }
-  h1 { font: 900 clamp(44px, 6vw, 76px)/1.02 var(--round); letter-spacing: -.025em; margin: 14px 0 20px; }
-  h1 .crumb { color: var(--sun); }
-  .lede { font-size: 20px; color: var(--muted); max-width: 34ch; margin: 0 0 32px; }
-  .cta { display: flex; gap: 16px; flex-wrap: wrap; }
-  .fine { margin-top: 18px; font-size: 14px; color: var(--muted); }
-  .fine code { font: 13px var(--mono); color: var(--ink); }
-
-  .hero > *, .rules > *, .cli > *, .steps > *, .menu > * { min-width: 0; }
-  .stage { position: relative; justify-self: center; }
-  .window {
-    width: 300px; border-radius: 22px; overflow: hidden; background: var(--cream);
-    box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 40px 80px -20px rgba(0,0,0,.6);
-    transform: rotate(2deg);
-  }
-  /* crumbs Dusty is sweeping off the window, one color per kind of mess */
-  .crumbs { position: absolute; inset: 0; pointer-events: none; }
-  .crumbs i { position: absolute; width: 14px; height: 14px; border-radius: 4px; opacity: 0; }
-  .js .crumbs i { animation: sweep 4.2s ease-in infinite; }
-  @keyframes sweep {
-    0% { opacity: 0; transform: translate(0, 0) rotate(0); }
-    12% { opacity: 1; }
-    100% { opacity: 0; transform: translate(-150px, 70px) rotate(-200deg); }
-  }
-
-  /* signature: the disk bar */
-  .disk { margin: 70px 0 20px; padding: 30px; border-radius: 26px; background: var(--surface); border: 1px solid var(--line); }
-  .disk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; flex-wrap: wrap; }
-  .disk-head h2 { font: 900 26px var(--round); margin: 0; }
-  .disk-head p { margin: 0; color: var(--muted); font-size: 15px; }
-  .bar { display: flex; height: 44px; border-radius: 14px; overflow: hidden; margin: 22px 0 18px; background: #120D22; }
-  .bar span {
-    position: relative; display: flex; align-items: center; justify-content: center; font: 800 13px var(--round);
-    color: #1A1430; white-space: nowrap; overflow: hidden; transform-origin: left;
-  }
-  .bar .used { background: #4A3F72; color: var(--muted); }
-  .bar .optin { background: repeating-linear-gradient(135deg, var(--grape) 0 8px, #6E55E0 8px 16px); color: #fff; }
-  .disk.go .bar span { animation: eat 1s ease-out both; }
-  @keyframes eat { from { transform: scaleX(0); } }
-  .legend { display: flex; flex-wrap: wrap; gap: 10px 22px; list-style: none; padding: 0; margin: 0; font-size: 14px; color: var(--muted); }
-  .legend li { display: flex; align-items: center; gap: 8px; }
-  .legend b { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
-
-  /* sections */
-  section { padding: 90px 0 0; }
-  .sec-head { max-width: 640px; margin-bottom: 40px; }
-  .sec-head h2 { font: 900 clamp(32px, 4vw, 46px)/1.08 var(--round); margin: 0 0 12px; letter-spacing: -.02em; }
-  .sec-head p { margin: 0; color: var(--muted); font-size: 18px; }
-
-  .menu { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .dish {
-    --c: var(--grape);
-    padding: 24px; border-radius: 22px; background: var(--surface); border: 1px solid var(--line);
-    border-top: 6px solid var(--c);
-  }
-  .dish .glyph {
-    width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; font-size: 24px;
-    background: color-mix(in srgb, var(--c) 22%, transparent);
-  }
-  .dish .glyph svg { width: 26px; height: 26px; fill: none; stroke: var(--c); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .dish h3 { font: 900 21px var(--round); margin: 16px 0 6px; display: flex; align-items: center; gap: 10px; }
-  .tag { font: 800 12px var(--round); letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; background: var(--c); color: #fff; }
-  .dish p { margin: 0; color: var(--muted); font-size: 15px; }
-
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
-  .step figure { margin: 0; }
-  .step .shot { border-radius: 20px; overflow: hidden; background: var(--cream); box-shadow: 0 30px 60px -25px rgba(0,0,0,.7); }
-  .step figcaption { margin-top: 18px; }
-  .step .n { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; background: var(--grape); font: 900 15px var(--round); margin-right: 10px; }
-  .step h3 { display: inline; font: 900 20px var(--round); }
-  .step p { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
-
-  .rules { display: grid; grid-template-columns: 300px 1fr; gap: 50px; align-items: start; }
-  .rules .happy { width: 260px; filter: drop-shadow(0 20px 24px rgba(0,0,0,.4)); position: sticky; top: 40px; }
-  .rules ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
-  .rules li {
-    display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 18px 20px; border-radius: 18px;
-    background: var(--bg-2); border: 1px solid var(--line);
-  }
-  .rules li svg { width: 34px; height: 34px; }
-  .rules strong { display: block; font: 800 17px var(--round); }
-  .rules span { color: var(--muted); font-size: 15px; }
-  .rules code, .cli code { font: 14px var(--mono); }
-
-  .cli { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
-  pre {
-    margin: 0; padding: 24px; border-radius: 20px; background: #0F0A1D; border: 1px solid var(--line);
-    font: 14px/1.8 var(--mono); color: #E6DEFF; overflow-x: auto;
-  }
-  pre .c { color: #7D73A6; }
-  pre .p { color: var(--mint); }
-
-  .last { text-align: center; padding: 110px 0 70px; }
-  .last img { width: 110px; margin: 0 auto 18px; }
-  .last h2 { font: 900 clamp(34px, 4.5vw, 52px)/1.05 var(--round); margin: 0 0 14px; }
-  .last p { color: var(--muted); margin: 0 0 30px; }
-  footer { border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--muted); font-size: 14px; }
-  footer .wrap { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-
-  @media (max-width: 900px) {
-    .hero, .rules, .cli { grid-template-columns: 1fr; }
-    .menu, .steps { grid-template-columns: 1fr 1fr; }
-    .stage { margin-top: 20px; }
-    .rules .happy { position: static; width: 180px; }
-    nav { gap: 16px; font-size: 14px; }
-    nav a:nth-child(2) { display: none; }
-  }
-  @media (max-width: 600px) {
-    .menu, .steps { grid-template-columns: 1fr; }
-    .window { width: 260px; }
-    h1 { font-size: 40px; }
-    .disk { padding: 22px; }
-    .bar span { font-size: 0; }
+  @media (max-width: 420px) {
+    .seg.stuff .lbl { display: none; }
+    .zoomnote { display: none; }
+    .site-head .btn-sm { padding: 9px 13px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .dust i, .disk.go .bar span { animation: none !important; }
-    .btn { transition: none; }
-    .js .crumbs i { animation: none; opacity: .8; }
+    .js .story { height: auto; }
+    .js .stage { position: relative; height: auto; overflow: visible; }
+    .stage-top { display: none; }
+    .pet { margin-top: 28px; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+
+  /* Night: follows the visitor's system appearance, like the app (DESIGN.md, Dark mode). */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17112B; --cream: #1C1534; --card: #251C44;
+      --ink: #F7F2FF; --muted: #B6ACD9; --text-soft: #C9C0E8;
+      --line: #3A2F63; --line-2: #4A3D7A; --stuff: #43386B; --track: #2E2454; --pill: #2E2454;
+      --grape-soft: #3A2C70; --mint-soft: #1F4250; --mint-line: #2E6B5E;
+      --grape-edge: #4A30B8; --mint-edge: #0F7A57; --coral-edge: #B02E42;
+      --alert-line: #5C2B4A; --faint: #7A70A3; --stuff-ink: #D6CEF2;
+      --seg-gap: rgba(23,17,43,.7); --shadow: rgba(0,0,0,.3);
+      --grape-text: #A58BFF; --mint-text: #60D8B1; --coral-text: #FF8897;
+    }
   }
 </style>
 </head>
 <body>
-<script>document.documentElement.classList.add('js')</script>
-<a class="skip" href="#menu">Skip to what Dusty cleans</a>
-<div class="dust" aria-hidden="true"></div>
-
-<header>
-  <div class="wrap">
-    <a class="brand" href="#top"><img src="img/icon.png" alt="">Dusty</a>
-    <nav aria-label="Sections">
-      <a href="#menu">What it cleans</a>
-      <a href="#how">How it works</a>
-      <a href="#rules">Safety</a>
-      <a href="https://github.com/Deuspheara/dusty">GitHub</a>
-    </nav>
-  </div>
+<header class="site-head">
+  <a class="brand" href="#top" aria-label="Dusty home"><img src="img/icon.png" alt="" width="38" height="38"><span>Dusty</span></a>
+  <a class="btn btn-sm" href="https://github.com/Deuspheara/dusty/releases/latest">Download</a>
 </header>
 
-<main id="top" tabindex="-1">
-  <div class="wrap">
-    <div class="hero">
-      <div>
-        <span class="eyebrow">● Free and open source, for macOS 13+</span>
-        <h1>Your Mac is full of <span class="crumb">crumbs</span>. Dusty eats them.</h1>
-        <p class="lede">A small cat that sniffs out build folders, dev caches and app junk, then clears them without touching anything you'd have to download again.</p>
-        <div class="cta">
-          <a class="btn btn-primary" href="https://github.com/Deuspheara/dusty/releases/latest">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>
-            Download for Mac
-          </a>
-          <a class="btn btn-ghost" href="https://github.com/Deuspheara/dusty">View source</a>
-        </div>
-        <p class="fine">Apple silicon and Intel. Prefer a terminal? There's a <code>dusty</code> CLI too.</p>
+<main id="top">
+  <section class="story" id="story" aria-labelledby="story-h">
+    <div class="stage" data-beat="5">
+      <div class="stage-top">
+        <div class="pill" role="progressbar" aria-label="Story progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><span class="pill-fill"></span></div>
+        <a class="skip" href="#get">Skip to download</a>
       </div>
-      <div class="stage">
-        <div class="window"><img src="img/screen-home.png" width="550" height="1000" alt="Dusty's home screen: a disk checkup card showing free space and a Start checkup button"></div>
-        <div class="crumbs" aria-hidden="true">
-          <i style="left: 8px; top: 58%; background: var(--coral)"></i>
-          <i style="left: 2px; top: 66%; background: var(--sun); animation-delay: .7s"></i>
-          <i style="left: 14px; top: 74%; background: var(--sky); animation-delay: 1.4s; width: 10px; height: 10px"></i>
-          <i style="left: 4px; top: 82%; background: var(--teal); animation-delay: 2.1s"></i>
-          <i style="left: 18px; top: 62%; background: var(--blue); animation-delay: 2.8s; width: 10px; height: 10px"></i>
-          <i style="left: 10px; top: 78%; background: var(--grape); animation-delay: 3.5s"></i>
+
+      <div class="copy">
+        <div class="kicker">
+          <div class="alert" role="status">
+            <span class="alert-ico" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16"><rect x="6.5" y="2.5" width="3" height="7.5" rx="1.5" fill="#fff"/><circle cx="8" cy="13" r="1.6" fill="#fff"/></svg></span>
+            <span>Your disk is almost full.<small>Macintosh HD · 92.4 GB free of 460 GB</small></span>
+          </div>
+          <span class="tagchip"><i aria-hidden="true">6</i><span class="tagtxt">Done</span></span>
         </div>
+        <h1 class="headline" id="story-h">18.2 GB back. Nothing to re-download.</h1>
+        <div class="meta">
+          <p class="sub">Builds, caches and logs pile up until the bar turns red.</p>
+          <p class="counter" aria-hidden="true"><span class="num">18.2</span><span class="unit">GB</span><span class="clabel">freed</span></p>
+          <div class="cta show">
+            <a class="btn btn-lg" href="https://github.com/Deuspheara/dusty/releases/latest"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0-4-4m4 4 4-4M4 16h12" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Download Dusty — free</a>
+            <p class="fine">macOS 13+ · Apple silicon &amp; Intel · MIT · no account</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="disk">
+        <div class="disk-head"><span>Macintosh HD <span class="zoomnote">· zoomed in on the leftovers</span></span><span class="free">110.6 GB free of 460 GB</span></div>
+        <div class="barwrap">
+          <div class="bar" role="img" aria-label="Disk bar: your stuff, 59.7 GB re-downloadable kept until you opt in, and 110.6 GB free after Dusty cleared 18.2 GB.">
+            <div class="seg used stuff" data-k="stuff" style="width:26%"><span class="lbl">your stuff</span>
+              <svg class="brk" viewBox="0 0 14 80" preserveAspectRatio="none" aria-hidden="true"><path d="M7 0 L2 10 L12 20 L2 30 L12 40 L2 50 L12 60 L2 70 L7 80" fill="none" style="stroke:var(--cream)" stroke-width="4" stroke-linejoin="round"/></svg></div>
+            <div class="seg used redl" data-k="redl" style="width:22%"></div>
+            <div class="seg used build" data-k="build" style="width:0%"></div>
+            <div class="seg used dev" data-k="dev" style="width:0%"></div>
+            <div class="seg used app" data-k="app" style="width:0%"></div>
+            <div class="seg freed" data-k="freed" style="width:30%"><span class="lbl">+18.2 GB</span></div>
+            <div class="seg free" data-k="free" style="width:22%"></div>
+          </div>
+          <div class="badges" aria-hidden="true">
+            <span class="badge" data-k="build"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <span class="badge" data-k="dev"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <span class="badge" data-k="app"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          </div>
+        </div>
+        <ul class="legend" aria-label="What Dusty found">
+          <li data-k="build"><i class="sw" style="background:var(--coral)"></i>Build folders <b>9.5 GB</b><span class="tag ok" aria-label="safe"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></li>
+          <li data-k="dev"><i class="sw" style="background:var(--sun)"></i>Dev caches <b>8.1 GB</b><span class="tag ok" aria-label="safe"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></li>
+          <li data-k="app"><i class="sw" style="background:var(--sky)"></i>App caches <b>0.7 GB</b><span class="tag ok" aria-label="safe"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></li>
+          <li data-k="redl"><i class="sw" style="background:repeating-linear-gradient(135deg,var(--grape) 0 3px,#9C84FF 3px 6px)"></i>Re-downloadable <b>59.7 GB</b><span class="tag ask">only if you say so</span></li>
+          <li data-k="stuff"><i class="sw" style="background:var(--stuff)"></i>Your stuff<span class="tag keep"><svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="5.5" width="8" height="5.5" rx="1.5" fill="#8A84A3"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5" fill="none" stroke="#8A84A3" stroke-width="1.6"/></svg>never touched</span></li>
+        </ul>
+      </div>
+
+      <div class="pet">
+        <div class="dusty">
+          <div class="dusty-bob"><div class="dusty-shake"><div class="dusty-body">
+            <img data-pose="idle" src="img/moods/idle.png" alt="" width="288" height="247">
+            <img data-pose="surprised" src="img/moods/surprised.png" alt="" width="292" height="262">
+            <img data-pose="happy" class="on" src="img/moods/happy.png" alt="Dusty, a lavender cat with a mint bandana, grinning" width="272" height="252">
+            <img data-pose="sad" src="img/moods/sad.png" alt="" width="287" height="229">
+          </div></div></div>
+          <span class="shadow" aria-hidden="true"></span>
+        </div>
+        <p class="bubble" aria-live="polite">All done. Your code and your opt‑ins? Untouched.</p>
+      </div>
+
+      <div class="fx" aria-hidden="true">
+        <div class="chip"><span class="chip-in"><span class="code">&lt;/&gt;</span>src/
+          <span class="stop"><svg viewBox="0 0 12 12"><path d="M3 6h6" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/></svg></span>
+          <span class="lock"><svg viewBox="0 0 12 12"><rect x="2" y="5.5" width="8" height="5.5" rx="1.5" fill="#fff"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5" fill="none" stroke="#fff" stroke-width="1.6"/></svg></span>
+        </span></div>
       </div>
     </div>
+  </section>
 
-    <div class="disk" id="disk">
-      <div class="disk-head">
-        <h2>Where 77.9 GB of crumbs were hiding</h2>
-        <p>One real developer Mac, first checkup. 18.2 GB could go right away, no re-downloads needed.</p>
+  <section class="section" aria-labelledby="rules-h">
+    <div class="rules">
+      <div>
+        <p class="eyebrow">Promises</p>
+        <h2 class="h2" id="rules-h">Rules I live by.</h2>
+        <img class="rules-art" src="img/moods/three-quarter.png" alt="Dusty sitting proudly, three-quarter view" width="429" height="401" loading="lazy">
       </div>
-      <div class="bar" role="img" aria-label="Leftovers found: build folders 9.5 GB, dev caches 8.1 GB, app caches 0.7 GB, re-downloadable 59.7 GB">
-        <span style="flex: 9.5; background: var(--coral); animation-delay: .05s">9.5 GB</span>
-        <span style="flex: 8.1; background: var(--sun); animation-delay: .15s">8.1 GB</span>
-        <span style="flex: 0.7; background: var(--sky); animation-delay: .25s"></span>
-        <span class="optin" style="flex: 59.7; animation-delay: .35s">59.7 GB, only if you say so</span>
-      </div>
-      <ul class="legend">
-        <li><b style="background: var(--coral)"></b>Build folders · 9.5 GB</li>
-        <li><b style="background: var(--sun)"></b>Dev tool caches · 8.1 GB</li>
-        <li><b style="background: var(--sky)"></b>App caches · 0.7 GB</li>
-        <li><b style="background: var(--grape)"></b>Re-downloadable, off by default · 59.7 GB</li>
-        <li>No junk or Docker leftovers on this one.</li>
+      <ul class="rule-list">
+        <li><span class="check" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><strong>Never your code.</strong><span>A project folder only goes if its parent has a project marker like <code>Cargo.toml</code> and git says it’s ignored.</span></div></li>
+        <li><span class="check" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><strong>Home folder only.</strong><span>Never Documents, Mail, Photos, iCloud Drive, Keychains or <code>.ssh</code>.</span></div></li>
+        <li><span class="check" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><strong>Big re-downloads wait for you.</strong><span><code>node_modules</code>, <code>.venv</code> and <code>Pods</code> stay off until you opt in.</span></div></li>
+        <li><span class="check" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><strong>Open apps keep their cache.</strong><span>“Slack’s open. I’ll leave its cache alone.”</span></div></li>
+        <li><span class="check" aria-hidden="true"><svg viewBox="0 0 12 12"><path d="M2 6.5 5 9l5-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <div><strong>You confirm first.</strong><span>Nothing goes without your OK. A practice run deletes nothing.</span></div></li>
       </ul>
     </div>
+  </section>
 
-    <section id="menu">
-      <div class="sec-head">
-        <h2>What's on Dusty's menu</h2>
-        <p>Six kinds of leftovers, each in its own color. The safe ones are picked for you. Anything that costs a re-download waits for your say-so.</p>
+  <section class="shots-sec" aria-labelledby="shots-h">
+    <div class="section">
+      <div class="shots-head">
+        <p class="eyebrow">How it goes</p>
+        <h2 class="h2" id="shots-h"><span class="n1" style="color:var(--coral-text)">Sniff</span> <span>·</span> <span class="n2" style="color:var(--grape-text)">Pick</span> <span>·</span> <span class="n3" style="color:var(--mint-text)">Munch</span></h2>
       </div>
-      <div class="menu">
-        <article class="dish" style="--c: var(--coral)">
-          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h18v5H3zM3 12h18v5H3zM9 7v5M15 12v5M6 17v0"/><path d="M5 20l1-3M12 20l-1-3M18 20l1-3" /></svg></div>
-          <h3>Build folders</h3>
-          <p>Flutter <code>build/</code>, Gradle <code>.gradle/</code>, Rust <code>target/</code>, SwiftPM <code>.build/</code>, <code>.next</code>, <code>dist</code>, <code>__pycache__</code>, CMake, Zig.</p>
-        </article>
-        <article class="dish" style="--c: var(--sun)">
-          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M4 12h16M10 7.5h4M10 16.5h4"/></svg></div>
-          <h3>Dev caches</h3>
-          <p>Xcode DerivedData and DeviceSupport, unavailable simulators, Gradle transforms, emulator snapshots, old IDE versions, Homebrew.</p>
-        </article>
-        <article class="dish" style="--c: var(--sky)">
-          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M6.5 6.5h.01M9 6.5h.01"/><path d="M8 14.5l2.5 2.5L16 12"/></svg></div>
-          <h3>App caches</h3>
-          <p>Browser, chat and media caches. An app that's open is left alone until you quit it.</p>
-        </article>
-        <article class="dish" style="--c: var(--teal)">
-          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 21z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg></div>
-          <h3>Junk &amp; logs</h3>
-          <p>Old logs and crash reports, unfinished downloads, stale Mail attachment copies.</p>
-        </article>
-        <article class="dish" style="--c: var(--blue)">
-          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="11" rx="2"/><path d="M7 7v11M11 7v11M15 7v11M19 7v11M8 4h8"/></svg></div>
-          <h3>Docker</h3>
-          <p>Build cache and stopped containers. Images and volumes are yours to opt into.</p>
-        </article>
-        <article class="dish" style="--c: var(--grape)">
-          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.4 1.5A3.5 3.5 0 0 1 17 18"/><path d="M12 11v9M9 17l3 3 3-3"/></svg></div>
-          <h3>Re-downloadable <span class="tag">opt-in</span></h3>
-          <p><code>node_modules</code>, <code>.venv</code>, Pods, package caches, old toolchains and simulator runtimes. Off until you tick them.</p>
-        </article>
-      </div>
-    </section>
-
-    <section id="how">
-      <div class="sec-head">
-        <h2>Sniff, pick, munch</h2>
-        <p>One checkup, one tap. Want control? Choose items one by one, or flip on a practice run that deletes nothing.</p>
-      </div>
-      <div class="steps">
-        <div class="step"><figure>
-          <div class="shot"><img src="img/screen-checkup.png" width="550" height="1000" alt="Checkup in progress: a running total of leftovers found and the latest finds"></div>
-          <figcaption><span class="n">1</span><h3>Checkup</h3><p>Dusty walks your projects and caches and reports what it finds as it goes.</p></figcaption>
-        </figure></div>
-        <div class="step"><figure>
-          <div class="shot"><img src="img/screen-results.png" width="550" height="1000" alt="Results: leftovers grouped by kind, with the safe picks already selected"></div>
-          <figcaption><span class="n">2</span><h3>Results</h3><p>The safe picks are already selected. Review them, or open Choose items.</p></figcaption>
-        </figure></div>
-        <div class="step"><figure>
-          <div class="shot"><img src="img/screen-done.png" width="550" height="1000" alt="Done: how much space was freed"></div>
-          <figcaption><span class="n">3</span><h3>Clean</h3><p>Dusty munches each item and tells you how much room you got back.</p></figcaption>
-        </figure></div>
-      </div>
-    </section>
-
-    <section id="rules">
-      <div class="rules">
-        <img class="happy" src="img/dusty-happy.png" alt="Dusty, smiling">
-        <div>
-          <div class="sec-head">
-            <h2>Dusty has house rules</h2>
-            <p>A cleaner you can't trust is worse than a full disk. These checks run before anything is deleted.</p>
-          </div>
-          <ul>
-            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#22C993" opacity=".2"/><path d="M10 17.5l4.5 4.5L24 12.5" stroke="#22C993" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <div><strong>Never your code</strong><span>A project folder is only cleared when its parent has a matching marker (<code>pubspec.yaml</code>, <code>Cargo.toml</code>…) and git says the folder is ignored.</span></div></li>
-            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#3DB8FF" opacity=".2"/><path d="M9 17l8-7 8 7v8H9z" stroke="#3DB8FF" stroke-width="3" fill="none" stroke-linejoin="round"/></svg>
-              <div><strong>Home only</strong><span>Paths must sit inside your home folder. No symlink tricks, no mounted volumes, never Documents, Mail, Photos, iCloud Drive, Keychains or <code>.ssh</code>.</span></div></li>
-            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#FFC83D" opacity=".2"/><circle cx="17" cy="17" r="7" stroke="#FFC83D" stroke-width="3" fill="none"/><path d="M17 13.5V17l2.5 2" stroke="#FFC83D" stroke-width="2.6" stroke-linecap="round"/></svg>
-              <div><strong>Busy apps are skipped</strong><span>If Slack, a browser or Figma is open, its cache stays put and Dusty tells you why.</span></div></li>
-            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#FF5A6E" opacity=".2"/><path d="M11 11l12 12M23 11L11 23" stroke="#FF5A6E" stroke-width="3" stroke-linecap="round"/></svg>
-              <div><strong>Some caches aren't caches</strong><span>Offline music, password managers, cloud sync, VPNs and virtual machines keep real data there, so Dusty doesn't touch them.</span></div></li>
-            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#8B6EFF" opacity=".25"/><path d="M13 18v-7a1.5 1.5 0 0 1 3 0v5M16 15V9.5a1.5 1.5 0 0 1 3 0V16M19 16v-4a1.5 1.5 0 0 1 3 0v6a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-2.5-4a1.5 1.5 0 0 1 2.5-1.6L13 18" stroke="#B9A8FF" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(-1 -3)"/></svg>
-              <div><strong>Nothing goes until you say so</strong><span>Every clean ends at a confirm screen. Practice run shows the whole thing with zero deletes.</span></div></li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <section id="cli">
-      <div class="cli">
-        <div class="sec-head" style="margin: 0">
-          <h2>Rather type than tap?</h2>
-          <p>The same engine and the same rules, as a CLI. Run it on a schedule and your disk stays tidy.</p>
-        </div>
-<pre><span class="c"># from a clone of the repo</span>
-<span class="p">$</span> npm install &amp;&amp; npm run build &amp;&amp; npm link
-<span class="p">$</span> dusty scan              <span class="c"># report only</span>
-<span class="p">$</span> dusty                   <span class="c"># pick, confirm, clean</span>
-<span class="p">$</span> dusty --dry-run --yes   <span class="c"># what a clean would remove</span>
-<span class="p">$</span> dusty -k 3              <span class="c"># spare projects touched in 3 days</span></pre>
-      </div>
-    </section>
-
-    <div class="last">
-      <img src="img/icon.png" alt="">
-      <h2>Give Dusty a snack.</h2>
-      <p>Free and open source, for Apple silicon and Intel Macs.</p>
-      <a class="btn btn-primary" href="https://github.com/Deuspheara/dusty/releases/latest">Download for Mac</a>
-      <p class="fine">macOS 13 or later · MIT license · no account, no tracking</p>
+      <ul class="shots">
+        <li><figure><img src="img/screen-checkup.png" alt="Dusty's checkup screen, scanning the home folder" width="550" height="1000" loading="lazy"><figcaption><b class="n1">Sniff</b><span>I look around and ask git.</span></figcaption></figure></li>
+        <li><figure><img src="img/screen-results.png" alt="Results screen listing leftovers by group with sizes" width="550" height="1000" loading="lazy"><figcaption><b class="n2">Pick</b><span>You choose what goes.</span></figcaption></figure></li>
+        <li><figure><img src="img/screen-done.png" alt="Done screen showing how much space came back" width="550" height="1000" loading="lazy"><figcaption><b class="n3">Munch</b><span>Confirm, and it’s gone.</span></figcaption></figure></li>
+      </ul>
     </div>
-  </div>
+  </section>
+
+  <section class="section final" id="get" aria-labelledby="get-h">
+    <div class="final-card">
+      <img src="img/moods/happy.png" alt="Dusty smiling with eyes closed" width="272" height="252" loading="lazy">
+      <h2 class="h2" id="get-h">Give your disk a snack.</h2>
+      <p class="lede">Free, open source, and a little hungry. Builds and caches go; your code stays.</p>
+      <div class="final-btns">
+        <a class="btn btn-lg" href="https://github.com/Deuspheara/dusty/releases/latest"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0-4-4m4 4 4-4M4 16h12" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Download Dusty — free</a>
+        <a class="btn btn-lg btn-ghost" href="https://github.com/Deuspheara/dusty">View the source</a>
+      </div>
+      <p class="fine">macOS 13+ · Apple silicon &amp; Intel · MIT · No account · No tracking</p>
+    </div>
+  </section>
 </main>
 
 <footer>
-  <div class="wrap">
-    <span>Dusty is MIT licensed. The app is Rust, the CLI is TypeScript, the cat is a good cat.</span>
-    <a href="https://github.com/Deuspheara/dusty">github.com/Deuspheara/dusty</a>
-  </div>
+  <span>Dusty · MIT licensed · open source</span>
+  <nav aria-label="Footer"><a href="https://github.com/Deuspheara/dusty">Source</a><a href="https://github.com/Deuspheara/dusty/releases/latest">Releases</a></nav>
 </footer>
 
 <script>
-  // dust specks drifting up the page
-  (function () {
-    var host = document.querySelector('.dust');
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    for (var i = 0; i < 26; i++) {
-      var d = document.createElement('i'), s = 2 + Math.random() * 5;
-      d.style.cssText = 'width:' + s + 'px;height:' + s + 'px;left:' + (Math.random() * 100) + '%;top:' + (20 + Math.random() * 100) +
-        '%;animation-duration:' + (18 + Math.random() * 30) + 's;animation-delay:-' + (Math.random() * 40) + 's';
-      host.appendChild(d);
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const story = $('#story'), stage = $('.stage'), bar = $('.bar'), fx = $('.fx');
+  const head = $('.headline'), bubble = $('.bubble'), tagtxt = $('.tagtxt'), tagnum = $('.tagchip i');
+  const sub = $('.sub'), counter = $('.counter'), cta = $('.cta'), num = $('.num'), clabel = $('.clabel');
+  const freeTxt = $('.disk-head .free'), pill = $('.pill'), pillFill = $('.pill-fill');
+  const dusty = $('.dusty'), body = $('.dusty-body'), chip = $('.chip');
+  const poses = {}; $$('.dusty img').forEach(i => poses[i.dataset.pose] = i);
+  const segEl = {}; $$('.seg').forEach(s => segEl[s.dataset.k] = s);
+  const badge = {}; $$('.badge').forEach(b => badge[b.dataset.k] = b);
+  const legend = {}; $$('.legend li').forEach(l => legend[l.dataset.k] = l);
+  const stuffLbl = $('.seg.stuff .lbl'), brk = $('.seg.stuff .brk'), freedLbl = $('.seg.freed .lbl');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  const easeOut = t => 1 - Math.pow(1 - t, 3);
+  const backOut = t => { const c = 1.9; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+
+  // Beat boundaries in story progress.
+  const B = [0, .1, .26, .4, .56, .86, 1];
+  const BEATS = [
+    { h: 'Out of space. <span class="hot">Again.</span>', say: 'Uh oh. That bar is very red. Scroll down and I’ll take a look.', tag: '', meta: 'sub', sub: 'Builds, caches and logs pile up until the bar turns red.' },
+    { h: 'What’s eating your disk?', say: 'Let me sniff around. I check with git so I never touch your real code.', tag: 'Sniff', meta: 'sub', sub: 'Let’s zoom in on what’s really in there.' },
+    { h: 'Whoa. That’s a lot.', say: 'Look at all these leftovers! Builds, caches, crumbs everywhere.', tag: 'Found', meta: 'counter', label: 'found' },
+    { h: 'Safe stuff only.', say: 'Builds and caches are safe. The big re-downloadable stuff waits for your OK.', tag: 'Pick', meta: 'counter', label: 'found' },
+    { h: 'Om nom nom.', say: 'Build folders, dev caches, app caches. Crunchy.', tag: 'Munch', meta: 'counter', label: 'freed' },
+    { h: '18.2 GB back. Nothing to re-download.', say: 'All done. Your code and your opt‑ins? Untouched.', tag: 'Done', meta: 'cta' }
+  ];
+  const REFUSE = 'Not that. That’s your code.';
+
+  // Bar: proportional (of 460 GB) vs zoomed display widths, in %.
+  const ORDER = ['stuff', 'redl', 'build', 'dev', 'app', 'freed', 'free'];
+  const SEG = {
+    stuff: { p: 62.96, d: 26 }, redl: { p: 12.98, d: 22 },
+    build: { p: 2.07, d: 13, k: 3, gb: 9.5 }, dev: { p: 1.76, d: 12, k: 3, gb: 8.1 }, app: { p: .15, d: 5, k: 1, gb: .7 },
+    freed: { p: 0, d: 0 }, free: { p: 20.09, d: 22 }
+  };
+  const COLOR = { build: '#FF5A6E', dev: '#FFC83D', app: '#3DB8FF' };
+  const D = .3; // block flight length (fraction of beat 4)
+  const BL = [];
+  ['build', 'dev', 'app'].forEach(s => { for (let j = 0; j < SEG[s].k; j++) BL.push({ s, gb: SEG[s].gb / SEG[s].k }); });
+  BL.forEach((b, i) => {
+    b.start = .04 + i * .1;
+    b.el = document.createElement('div'); b.el.className = 'blk'; b.el.style.background = COLOR[b.s];
+    fx.appendChild(b.el);
+  });
+  const GB_SUM = BL.reduce((a, b) => a + b.gb, 0);
+  const bt = (b, t4) => clamp((t4 - b.start) / D);
+
+  function widths(z, t4) {
+    const w = {};
+    ORDER.forEach(k => w[k] = lerp(SEG[k].p, SEG[k].d, z));
+    BL.forEach(b => { const sh = easeOut(clamp(bt(b, t4) / .25)) * SEG[b.s].d / SEG[b.s].k; w[b.s] -= sh; w.freed += sh; });
+    return w;
+  }
+  const leftOf = (w, k) => { let x = 0; for (const o of ORDER) { if (o === k) return x; x += w[o]; } return x; };
+
+  function progress() {
+    if (reduce) return 1;
+    const r = story.getBoundingClientRect();
+    const span = r.height - innerHeight;
+    return span > 0 ? clamp(-r.top / span) : 1;
+  }
+
+  const st = { beat: -1, pose: 'happy', say: null, metaMode: 'cta', primed: false, chompUntil: 0, confetti: false, prev: BL.map(() => 0), wasZoomed: null, wasJudged: null };
+
+  function setPose(p) {
+    if (p === st.pose) return;
+    poses[st.pose].classList.remove('on'); poses[st.pose].alt = '';
+    poses[p].classList.add('on');
+    poses[p].alt = { idle: 'Dusty the cat, sitting calmly', surprised: 'Dusty with a small surprised “o” mouth', happy: 'Dusty grinning with eyes closed', sad: 'Dusty looking teary' }[p];
+    st.pose = p;
+  }
+  const anim = (el, kf, opt) => (reduce || !el.animate) ? null : el.animate(kf, opt);
+
+  function setHeadline(html) {
+    head.innerHTML = html;
+    if (!st.primed) return;
+    anim(head, [{ transform: 'scale(.9)', opacity: 0 }, { transform: 'scale(1.04)', opacity: 1, offset: .6 }, { transform: 'scale(1)', opacity: 1 }], { duration: 420, easing: 'cubic-bezier(.2,.8,.3,1)' });
+  }
+  function setSay(text) {
+    if (text === st.say) return;
+    st.say = text; bubble.textContent = text;
+    if (st.primed && text) anim(bubble, [{ transform: 'scale(.85)' }, { transform: 'scale(1.05)', offset: .6 }, { transform: 'scale(1)' }], { duration: 380, easing: 'ease-out' });
+  }
+  function setMeta(mode) {
+    if (mode === st.metaMode) return;
+    st.metaMode = mode;
+    sub.classList.toggle('show', mode === 'sub'); counter.classList.toggle('show', mode === 'counter'); cta.classList.toggle('show', mode === 'cta');
+  }
+  const squash = (sx, sy, d = 340) => anim(body, [{ transform: 'scale(1,1)' }, { transform: `scale(${sx},${sy})`, offset: .35 }, { transform: `scale(${2 - sx},${2 - sy})`, offset: .7 }, { transform: 'scale(1,1)' }], { duration: d, easing: 'ease-out' });
+
+  function onBeatEnter(beat, from) {
+    if (beat === 2) squash(.92, 1.1, 520); // ears perk
+    if (beat === 5 && from < 5) {
+      anim(body, [{ transform: 'translateY(0) scale(1,1)' }, { transform: 'translateY(0) scale(1.1,.9)', offset: .15 }, { transform: 'translateY(-46px) scale(.94,1.08)', offset: .45 }, { transform: 'translateY(0) scale(1.08,.92)', offset: .78 }, { transform: 'translateY(0) scale(1,1)' }], { duration: 720, easing: 'ease-in-out' });
+      if (!st.confetti) { st.confetti = true; confetti(); }
     }
-  })();
-  // the disk bar fills in when it scrolls into view
-  (function () {
-    var disk = document.getElementById('disk');
-    if (!('IntersectionObserver' in window)) { disk.classList.add('go'); return; }
-    new IntersectionObserver(function (e, o) {
-      if (e[0].isIntersecting) { disk.classList.add('go'); o.disconnect(); }
-    }, { threshold: .4 }).observe(disk);
-  })();
+  }
+
+  function mouth(sr) {
+    const r = dusty.getBoundingClientRect();
+    return { x: r.left - sr.left + r.width * .4, y: r.top - sr.top + r.height * .56, r };
+  }
+
+  function spawnPuff(m, color) {
+    const words = ['Om nom!', 'nom', 'Om nom', 'nom nom'];
+    const p = document.createElement('span'); p.className = 'puff'; p.textContent = words[Math.floor(Math.random() * words.length)];
+    fx.appendChild(p);
+    const x = m.x + m.r.width * (.2 + Math.random() * .25), y = m.y - m.r.height * .7;
+    const a = anim(p, [
+      { transform: `translate(${x}px,${y + 10}px) scale(.5)`, opacity: 0 },
+      { transform: `translate(${x + 6}px,${y - 14}px) scale(1.08)`, opacity: 1, offset: .3 },
+      { transform: `translate(${x + 14}px,${y - 50}px) scale(1)`, opacity: 0 }
+    ], { duration: 900, easing: 'ease-out' });
+    if (a) a.onfinish = () => p.remove(); else p.remove();
+    for (let i = 0; i < 6; i++) {
+      const c = document.createElement('i'); c.className = 'crumb';
+      const s = 5 + Math.random() * 5; c.style.width = c.style.height = s + 'px'; c.style.background = color;
+      fx.appendChild(c);
+      const dx = (Math.random() - .5) * 120, dy = -20 - Math.random() * 50;
+      const ca = anim(c, [
+        { transform: `translate(${m.x}px,${m.y}px) rotate(0)`, opacity: 1 },
+        { transform: `translate(${m.x + dx * .6}px,${m.y + dy}px) rotate(180deg)`, opacity: 1, offset: .45 },
+        { transform: `translate(${m.x + dx}px,${m.y + 30}px) rotate(320deg)`, opacity: 0 }
+      ], { duration: 650 + Math.random() * 250, easing: 'ease-out' });
+      if (ca) ca.onfinish = () => c.remove(); else c.remove();
+    }
+  }
+
+  function confetti() {
+    if (reduce) return;
+    const sr = stage.getBoundingClientRect(), r = dusty.getBoundingClientRect();
+    const cx = r.left - sr.left + r.width * .4, cy = r.top - sr.top + r.height * .3;
+    const cols = ['#7C5CFF', '#22C993', '#FF5A6E', '#FFC83D', '#3DB8FF', '#2EC4B6', '#5B8DEF'];
+    for (let i = 0; i < 44; i++) {
+      const c = document.createElement('i'); c.className = 'confetti';
+      const w = 6 + Math.random() * 6, h = Math.random() < .5 ? w : w * 1.8;
+      c.style.width = w + 'px'; c.style.height = h + 'px'; c.style.background = cols[i % cols.length];
+      if (Math.random() < .35) c.style.borderRadius = '50%';
+      fx.appendChild(c);
+      const ang = -Math.PI / 2 + (Math.random() - .5) * 2.2, v = 160 + Math.random() * 260;
+      const dx = Math.cos(ang) * v, dy = Math.sin(ang) * v, rot = (Math.random() - .5) * 900;
+      const a = anim(c, [
+        { transform: `translate(${cx}px,${cy}px) rotate(0)`, opacity: 1 },
+        { transform: `translate(${cx + dx * .7}px,${cy + dy}px) rotate(${rot * .5}deg)`, opacity: 1, offset: .4 },
+        { transform: `translate(${cx + dx}px,${cy + dy + 260}px) rotate(${rot}deg)`, opacity: 0 }
+      ], { duration: 1500 + Math.random() * 700, easing: 'cubic-bezier(.2,.6,.4,1)' });
+      if (a) a.onfinish = () => c.remove(); else c.remove();
+    }
+  }
+
+  const bez = (a, c, b, q) => (1 - q) * (1 - q) * a + 2 * (1 - q) * q * c + q * q * b;
+
+  function render() {
+    const p = progress();
+    let beat = 0; for (let i = 0; i < 6; i++) if (p >= B[i]) beat = i;
+    const t = clamp((p - B[beat]) / (B[beat + 1] - B[beat]));
+    const cfg = BEATS[beat];
+    const now = performance.now();
+
+    // --- discrete beat state
+    if (beat !== st.beat) {
+      const from = st.beat;
+      stage.dataset.beat = beat;
+      setHeadline(cfg.h);
+      tagtxt.textContent = cfg.tag; tagnum.textContent = beat;
+      if (cfg.sub) sub.textContent = cfg.sub;
+      if (cfg.label) clabel.textContent = cfg.label;
+      setMeta(cfg.meta);
+      if (st.primed) onBeatEnter(beat, from);
+      st.beat = beat;
+    }
+    pillFill.style.transform = `scaleX(${Math.max(p, .02)})`;
+    pill.setAttribute('aria-valuenow', Math.round(p * 100));
+
+    // --- scrubbed values
+    const rise = 1; // Dusty is on stage from the first screen
+    const z = beat === 0 ? 0 : beat === 1 ? ease(clamp((t - .2) / .6)) : 1;
+    const t4 = beat < 4 ? 0 : beat === 4 ? t : 1;
+    const w = widths(z, t4);
+    ORDER.forEach(k => segEl[k].style.width = w[k].toFixed(3) + '%');
+    stuffLbl.style.opacity = clamp((z - .5) * 2); brk.style.opacity = z;
+    freedLbl.style.opacity = w.freed > 12 ? 1 : 0;
+
+    const zoomed = z > .55, judged = beat >= 3;
+    if (zoomed !== st.wasZoomed) { stage.classList.toggle('zoomed', zoomed); st.wasZoomed = zoomed; }
+    if (judged !== st.wasJudged) { stage.classList.toggle('judged', judged); st.wasJudged = judged; }
+    ['build', 'dev', 'app'].forEach(k => {
+      badge[k].style.left = (leftOf(w, k) + w[k] / 2) + '%';
+      badge[k].classList.toggle('on', judged && w[k] > 1.5);
+      legend[k].classList.toggle('done', BL.filter(b => b.s === k).every(b => bt(b, t4) >= .92));
+    });
+
+    const dh = dusty.offsetHeight, pad = parseFloat(getComputedStyle(dusty.parentNode).paddingBottom) || 0;
+    dusty.style.transform = `translateY(${((1 - rise) * (dh * .78 + pad)).toFixed(1)}px)`;
+
+    // counters
+    let freedGB = 0;
+    BL.forEach(b => freedGB += b.gb * easeOut(clamp((bt(b, t4) - .55) / .45)));
+    freedGB = freedGB / GB_SUM * 18.2;
+    if (beat === 2) num.textContent = (77.9 * easeOut(clamp(t / .7))).toFixed(1);
+    else if (beat === 3) num.textContent = '77.9';
+    else if (beat >= 4) num.textContent = freedGB.toFixed(1);
+    freedLbl.textContent = '+' + freedGB.toFixed(1) + ' GB';
+    freeTxt.textContent = (beat >= 4 ? (92.4 + freedGB).toFixed(1) : '92.4') + ' GB free of 460 GB';
+
+    // --- geometry for flying things
+    const sr = stage.getBoundingClientRect(), br = bar.getBoundingClientRect();
+    const bx = br.left - sr.left + bar.clientLeft, by = br.top - sr.top + bar.clientTop, bw = bar.clientWidth, bh = bar.clientHeight;
+    const m = mouth(sr);
+    const arc = Math.max(70, bh * 1.6);
+
+    // blocks (beat 4)
+    let inFlight = false;
+    BL.forEach((b, i) => {
+      const q0 = bt(b, t4);
+      if (q0 > 0 && q0 < 1 && beat === 4) {
+        const ws = widths(1, b.start);
+        const cw = bw * SEG[b.s].d / SEG[b.s].k / 100;
+        const x0 = bx + bw * (leftOf(ws, b.s) + ws[b.s]) / 100 - cw / 2, y0 = by + bh / 2;
+        const x1 = lerp(x0, m.x, .35), y1 = Math.min(y0, m.y) - arc;
+        const q = ease(q0);
+        const x = bez(x0, x1, m.x, q), y = bez(y0, y1, m.y, q);
+        const s = lerp(1, .32, q * q) * (1 + .16 * Math.sin(Math.PI * clamp(q0 / .35)));
+        const el = b.el;
+        el.style.display = 'block'; el.style.width = cw + 'px'; el.style.height = bh + 'px';
+        el.style.opacity = q0 > .88 ? clamp((1 - q0) / .12) : 1;
+        el.style.transform = `translate(${(x - cw / 2).toFixed(1)}px,${(y - bh / 2).toFixed(1)}px) rotate(${(q * (i % 2 ? -220 : 200)).toFixed(1)}deg) scale(${s.toFixed(3)})`;
+        if (q0 > .35) inFlight = true;
+      } else b.el.style.display = 'none';
+      if (st.primed && beat === 4 && st.prev[i] < .92 && q0 >= .92) {
+        st.chompUntil = now + 260;
+        squash(1.12, .88, 320);
+        spawnPuff(m, COLOR[b.s]);
+        setTimeout(schedule, 280);
+      }
+      st.prev[i] = q0;
+    });
+
+    // near-miss chip (beat 3)
+    let say = cfg.say, pose = 'idle', refuse = false;
+    if (beat === 3) {
+      const x0 = bx + bw * (w.stuff * .45) / 100, y0 = by + bh / 2;
+      chip.style.display = "block";
+      const cr = chip.firstElementChild, cw2 = cr.offsetWidth / 2;
+      const roomLeft = m.r.left - sr.left > cw2 * 2 + 40;
+      const tx = roomLeft ? m.r.left - sr.left - cw2 - 14 : m.x, ty = roomLeft ? m.y : m.r.top - sr.top + m.r.height * .86;
+      const x1 = lerp(x0, tx, .3), y1 = Math.min(y0, ty) - arc * .6;
+      let f = 0, sc = 1, op = 1, nope = false, safe = false;
+      if (t < .12) { sc = backOut(clamp(t / .12)); }
+      else if (t < .42) f = easeOut((t - .12) / .3);
+      else if (t < .7) { f = 1; nope = true; }
+      else if (t < .92) { f = 1 - ease((t - .7) / .22); safe = true; }
+      else { safe = true; op = 1 - (t - .92) / .08; }
+      const x = bez(x0, x1, tx, f), y = bez(y0, y1, ty, f);
+      chip.style.display = 'block'; chip.style.opacity = op;
+      chip.style.transform = `translate(${(x - cr.offsetWidth / 2).toFixed(1)}px,${(y - cr.offsetHeight / 2).toFixed(1)}px) scale(${sc.toFixed(3)})`;
+      chip.classList.toggle('nope', nope); chip.classList.toggle('safe', safe);
+      if (t >= .3 && t < .85) say = REFUSE;
+      if (t >= .36 && t < .8) pose = 'sad';
+      refuse = nope;
+    } else chip.style.display = 'none';
+    dusty.classList.toggle('refuse', refuse && !reduce);
+
+    if (beat === 0) pose = 'sad';
+    else if (beat === 1) pose = t < .55 ? 'idle' : 'surprised';
+    else if (beat === 2) pose = 'surprised';
+    else if (beat === 4) pose = (now < st.chompUntil || t > .95) ? 'happy' : (inFlight || t < .04 ? 'surprised' : 'idle');
+    else if (beat === 5) pose = 'happy';
+    setPose(pose);
+    setSay(say);
+    st.primed = true;
+  }
+
+  let ticking = false;
+  function schedule() { if (!ticking) { ticking = true; requestAnimationFrame(() => { ticking = false; render(); }); } }
+  render();
+  if (!reduce) {
+    addEventListener('scroll', schedule, { passive: true });
+    addEventListener('resize', schedule, { passive: true });
+  }
+  addEventListener('load', schedule);
+})();
 </script>
 </body>
 </html>
