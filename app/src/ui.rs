@@ -15,37 +15,115 @@ use crate::platform::{self, haptic, Haptic};
 // ───────────────────────── theme ─────────────────────────
 
 pub const FONT: &str = ".SystemUIFont";
-const BG: u32 = 0xFFFBF5;
-const INK: u32 = 0x2B2340;
-const MUTED: u32 = 0x8A84A3;
-const LINE: u32 = 0xE8E4F3;
-const CARD: u32 = 0xFFFFFF;
 const TOP: f32 = 54.; // the draggable band under the transparent titlebar
 const ROW_H: f32 = 34.; // a row in the checkup's "latest finds" card
 
 #[derive(Clone, Copy)]
 struct Tone {
     base: u32,
+    /// the solid bottom edge of a chunky button
     edge: u32,
+    /// tinted background behind a glyph or a selected row
     soft: u32,
     hover: u32,
+    /// the tone as readable text on a card (sizes, group names)
+    text: u32,
 }
-const GRAPE: Tone = Tone { base: 0x7C5CFF, edge: 0x5B3FD9, soft: 0xEFEAFF, hover: 0x8B6EFF };
-const MINT: Tone = Tone { base: 0x22C993, edge: 0x169E72, soft: 0xDFF8EE, hover: 0x2ED69F };
-const CORAL: Tone = Tone { base: 0xFF5A6E, edge: 0xD63D52, soft: 0xFFE5E9, hover: 0xFF6B7D };
-const SUN: Tone = Tone { base: 0xFFC83D, edge: 0xE0A100, soft: 0xFFF4D6, hover: 0xFFD25E };
-const SKY: Tone = Tone { base: 0x3DB8FF, edge: 0x1E93D6, soft: 0xE3F5FF, hover: 0x55C1FF };
-const BLUE: Tone = Tone { base: 0x5B8DEF, edge: 0x3F6FD1, soft: 0xE6EEFF, hover: 0x6E9BF2 };
-const TEAL: Tone = Tone { base: 0x2EC4B6, edge: 0x1E9C90, soft: 0xDDF7F4, hover: 0x45D0C3 };
+
+/// Every color the UI paints. Two of these exist: warm paper by day, plum night (same as the website).
+struct Palette {
+    bg: u32,
+    ink: u32,
+    muted: u32,
+    line: u32,
+    card: u32,
+    card_hover: u32,
+    /// "other used space" on the disk bar
+    used: u32,
+    disabled_edge: u32,
+    /// dims the window behind the confirm sheet, and drop shadows
+    scrim: u32,
+    scrim_a: f32,
+    /// text on the busy-items warning (on `sun.soft`)
+    warn: u32,
+    grape: Tone,
+    mint: Tone,
+    coral: Tone,
+    sun: Tone,
+    sky: Tone,
+    blue: Tone,
+    teal: Tone,
+}
+
+const LIGHT: Palette = Palette {
+    bg: 0xFFFBF5,
+    ink: 0x2B2340,
+    muted: 0x8A84A3,
+    line: 0xE8E4F3,
+    card: 0xFFFFFF,
+    card_hover: 0xFCFBFF,
+    used: 0xBAB3CF,
+    disabled_edge: 0xD4CFE4,
+    scrim: 0x2B2340,
+    scrim_a: 0.45,
+    warn: 0x8A6000,
+    grape: Tone { base: 0x7C5CFF, edge: 0x5B3FD9, soft: 0xEFEAFF, hover: 0x8B6EFF, text: 0x5B3FD9 },
+    mint: Tone { base: 0x22C993, edge: 0x169E72, soft: 0xDFF8EE, hover: 0x2ED69F, text: 0x169E72 },
+    coral: Tone { base: 0xFF5A6E, edge: 0xD63D52, soft: 0xFFE5E9, hover: 0xFF6B7D, text: 0xD63D52 },
+    sun: Tone { base: 0xFFC83D, edge: 0xE0A100, soft: 0xFFF4D6, hover: 0xFFD25E, text: 0xE0A100 },
+    sky: Tone { base: 0x3DB8FF, edge: 0x1E93D6, soft: 0xE3F5FF, hover: 0x55C1FF, text: 0x1E93D6 },
+    blue: Tone { base: 0x5B8DEF, edge: 0x3F6FD1, soft: 0xE6EEFF, hover: 0x6E9BF2, text: 0x3F6FD1 },
+    teal: Tone { base: 0x2EC4B6, edge: 0x1E9C90, soft: 0xDDF7F4, hover: 0x45D0C3, text: 0x1E9C90 },
+};
+
+/// Night: plum surfaces, tones kept vivid, accent text lifted so it reads on dark cards.
+const DARK: Palette = Palette {
+    bg: 0x17112B,
+    ink: 0xF7F2FF,
+    muted: 0xB6ACD9,
+    line: 0x3A2F63,
+    card: 0x251C44,
+    card_hover: 0x2C2250,
+    used: 0x5A4E8A,
+    disabled_edge: 0x2B2350,
+    scrim: 0x07040F,
+    scrim_a: 0.6,
+    warn: 0xFFD773,
+    grape: Tone { base: 0x8B6EFF, edge: 0x5B3FD9, soft: 0x3B2E6D, hover: 0x9B82FF, text: 0xAB97FF },
+    mint: Tone { base: 0x22C993, edge: 0x13805D, soft: 0x244255, hover: 0x2ED69F, text: 0x60D8B1 },
+    coral: Tone { base: 0xFF5A6E, edge: 0xB8324A, soft: 0x552A4D, hover: 0xFF6B7D, text: 0xFF8897 },
+    sun: Tone { base: 0xFFC83D, edge: 0xB98500, soft: 0x554242, hover: 0xFFD25E, text: 0xFFD773 },
+    sky: Tone { base: 0x3DB8FF, edge: 0x1877B0, soft: 0x2A3E6D, hover: 0x55C1FF, text: 0x73CCFF },
+    blue: Tone { base: 0x5B8DEF, edge: 0x3459AE, soft: 0x31356A, hover: 0x6E9BF2, text: 0x89ADF3 },
+    teal: Tone { base: 0x2EC4B6, edge: 0x177E75, soft: 0x27415D, hover: 0x45D0C3, text: 0x69D5CA },
+};
+
+/// Follows the macOS appearance; flipped by `set_appearance` whenever System Settings changes it.
+static DARK_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn pal() -> &'static Palette {
+    if DARK_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+        &DARK
+    } else {
+        &LIGHT
+    }
+}
+
+/// Returns true when the palette actually changed.
+fn set_appearance(a: WindowAppearance) -> bool {
+    let dark = matches!(a, WindowAppearance::Dark | WindowAppearance::VibrantDark);
+    DARK_MODE.swap(dark, std::sync::atomic::Ordering::Relaxed) != dark
+}
 
 fn tone(g: Group) -> Tone {
+    let p = pal();
     match g {
-        Group::Build => CORAL,
-        Group::Apps => SKY,
-        Group::Cache => SUN,
-        Group::Junk => TEAL,
-        Group::Docker => BLUE,
-        Group::Redownload => GRAPE,
+        Group::Build => p.coral,
+        Group::Apps => p.sky,
+        Group::Cache => p.sun,
+        Group::Junk => p.teal,
+        Group::Docker => p.blue,
+        Group::Redownload => p.grape,
     }
 }
 fn glyph(g: Group) -> &'static str {
@@ -173,6 +251,7 @@ pub struct DustyApp {
     done_estimated: bool,
     done_disk: Disk,
     hints_done: HashSet<usize>,
+    _appearance: Subscription,
 }
 
 const HINTS: &[(&str, &str)] = &[
@@ -184,7 +263,19 @@ const HINTS: &[(&str, &str)] = &[
 ];
 
 impl DustyApp {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        // light or dark follows System Settings live; DUSTY_APPEARANCE=dark|light pins it (screenshots)
+        let pinned = match std::env::var("DUSTY_APPEARANCE").as_deref() {
+            Ok("dark") => Some(WindowAppearance::Dark),
+            Ok("light") => Some(WindowAppearance::Light),
+            _ => None,
+        };
+        set_appearance(pinned.unwrap_or(window.appearance()));
+        let appearance = cx.observe_window_appearance(window, move |_, window, cx| {
+            if pinned.is_none() && set_appearance(window.appearance()) {
+                cx.notify();
+            }
+        });
         let disk = engine::disk();
         let dusty = cx.new(|_| Dusty::new(250.));
         let mut app = DustyApp {
@@ -211,6 +302,7 @@ impl DustyApp {
             done_estimated: false,
             done_disk: disk,
             hints_done: HashSet::new(),
+            _appearance: appearance,
         };
         app.enter_home(cx);
         app
@@ -641,9 +733,9 @@ enum Btn {
 fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, kind: Btn, enabled: bool) -> Stateful<Div> {
     let (bg, edge, fg, hover) = match kind {
         Btn::Primary(t) => (t.base, t.edge, 0xFFFFFF, t.hover),
-        Btn::Ghost => (CARD, LINE, MUTED, 0xFBFAFF),
+        Btn::Ghost => (pal().card, pal().line, pal().muted, pal().card_hover),
     };
-    let (bg, edge, fg) = if enabled { (bg, edge, fg) } else { (LINE, 0xD4CFE4, MUTED) };
+    let (bg, edge, fg) = if enabled { (bg, edge, fg) } else { (pal().line, pal().disabled_edge, pal().muted) };
     div()
         .id(id)
         .h(px(58.))
@@ -682,13 +774,13 @@ fn bubble(text: SharedString, key: u64) -> impl IntoElement {
         .px(px(18.))
         .py(px(12.))
         .rounded(px(18.))
-        .bg(rgb(CARD))
+        .bg(rgb(pal().card))
         .border_2()
-        .border_color(rgb(LINE))
+        .border_color(rgb(pal().line))
         .border_b_4()
         .text_size(px(15.))
         .font_weight(FontWeight::BOLD)
-        .text_color(rgb(INK))
+        .text_color(rgb(pal().ink))
         .text_center()
         .child(text)
         .with_animation(ElementId::NamedInteger("bubble".into(), key), Animation::new(Duration::from_millis(360)), |el, t| el.opacity((t * 2.).min(1.)).mt(px(8. * (1. - back_out(t)))))
@@ -704,10 +796,10 @@ fn disk_bar(disk: Disk, segments: &[(u64, u32)], t: f32) -> impl IntoElement {
         move |b, _, window, _| {
             let (x0, w, h) = (b.origin.x, b.size.width, b.size.height);
             let r = h / 2.;
-            window.paint_quad(fill(b, rgb(LINE)).corner_radii(r));
+            window.paint_quad(fill(b, rgb(pal().line)).corner_radii(r));
             let grow = if segs.is_empty() { 1. - (1. - t).powi(3) } else { 1. };
             let mut x = used_other;
-            let mut quads = vec![(0., used_other * grow, 0xBAB3CFu32)];
+            let mut quads = vec![(0., used_other * grow, pal().used)];
             for (i, (fw, c)) in segs.iter().enumerate() {
                 // each segment eases in a little after the previous one
                 let k = ((t * 1.4 - i as f32 * 0.12).clamp(0., 1.)).powf(0.6);
@@ -736,7 +828,7 @@ fn progress_bar(t: f32, tone: Tone) -> impl IntoElement {
         |_, _, _| {},
         move |b, _, window, _| {
             let r = b.size.height / 2.;
-            window.paint_quad(fill(b, rgb(LINE)).corner_radii(r));
+            window.paint_quad(fill(b, rgb(pal().line)).corner_radii(r));
             let w = b.size.width * t;
             if w > px(0.5) {
                 // never narrower than the bar is tall, so the rounded ends stay round
@@ -756,11 +848,11 @@ fn progress_bar(t: f32, tone: Tone) -> impl IntoElement {
 }
 
 fn card() -> Div {
-    div().rounded(px(20.)).bg(rgb(CARD)).border_2().border_color(rgb(LINE)).border_b_4()
+    div().rounded(px(20.)).bg(rgb(pal().card)).border_2().border_color(rgb(pal().line)).border_b_4()
 }
 
 fn label_small(s: impl Into<SharedString>) -> Div {
-    div().text_size(px(12.)).font_weight(FontWeight::BOLD).text_color(rgb(MUTED)).child(s.into())
+    div().text_size(px(12.)).font_weight(FontWeight::BOLD).text_color(rgb(pal().muted)).child(s.into())
 }
 
 fn pop_in<E: IntoElement + 'static>(el: E, id: ElementId, delay_ms: u64) -> impl IntoElement {
@@ -823,9 +915,9 @@ impl Render for DustyApp {
         div()
             .size_full()
             .relative()
-            .bg(rgb(BG))
+            .bg(rgb(pal().bg))
             .font_family(FONT)
-            .text_color(rgb(INK))
+            .text_color(rgb(pal().ink))
             .flex()
             .flex_col()
             .child(self.top_band(cx))
@@ -844,7 +936,7 @@ impl Render for DustyApp {
                 let a = (age * 6.).min(1.) * ((2.6 - age) * 4.).clamp(0., 1.);
                 d.child(
                     div().absolute().top(px(TOP + 6.)).left_0().right_0().flex().justify_center().child(
-                        div().px(px(16.)).py(px(10.)).rounded(px(14.)).bg(rgb(INK)).text_color(rgb(0xFFFFFF)).text_size(px(14.)).font_weight(FontWeight::BOLD).opacity(a).mt(px(-10. * (1. - a))).child(msg),
+                        div().px(px(16.)).py(px(10.)).rounded(px(14.)).bg(rgb(pal().ink)).text_color(rgb(pal().bg)).text_size(px(14.)).font_weight(FontWeight::BOLD).opacity(a).mt(px(-10. * (1. - a))).child(msg),
                     ),
                 )
             })
@@ -880,7 +972,7 @@ impl DustyApp {
                     platform::begin_window_drag(window, cx);
                 }
             })
-            .child(div().text_size(px(14.)).font_weight(FontWeight::BLACK).text_color(rgb(MUTED)).child(title))
+            .child(div().text_size(px(14.)).font_weight(FontWeight::BLACK).text_color(rgb(pal().muted)).child(title))
             .when(self.screen == Screen::Pick, |d| {
                 d.child(
                     div()
@@ -892,13 +984,13 @@ impl DustyApp {
                         .py(px(5.))
                         .rounded_full()
                         .border_2()
-                        .border_color(rgb(LINE))
-                        .bg(rgb(CARD))
+                        .border_color(rgb(pal().line))
+                        .bg(rgb(pal().card))
                         .text_size(px(13.))
                         .font_weight(FontWeight::BLACK)
-                        .text_color(rgb(MUTED))
+                        .text_color(rgb(pal().muted))
                         .cursor_pointer()
-                        .hover(|s| s.text_color(rgb(GRAPE.base)).border_color(rgb(GRAPE.base)))
+                        .hover(|s| s.text_color(rgb(pal().grape.base)).border_color(rgb(pal().grape.base)))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.dusty(cx, |d| d.set_size(118.));
@@ -918,13 +1010,13 @@ impl DustyApp {
                         .py(px(5.))
                         .rounded_full()
                         .border_2()
-                        .border_color(rgb(LINE))
-                        .bg(rgb(CARD))
+                        .border_color(rgb(pal().line))
+                        .bg(rgb(pal().card))
                         .text_size(px(13.))
                         .font_weight(FontWeight::BLACK)
-                        .text_color(rgb(MUTED))
+                        .text_color(rgb(pal().muted))
                         .cursor_pointer()
-                        .hover(|s| s.text_color(rgb(GRAPE.base)).border_color(rgb(GRAPE.base)))
+                        .hover(|s| s.text_color(rgb(pal().grape.base)).border_color(rgb(pal().grape.base)))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)))
                         .child("Rescan"),
@@ -944,7 +1036,7 @@ impl DustyApp {
             .child(self.enter(bubble(self.bubble.clone(), self.nav), 0.12))
             .child(div().mt(px(6.)).child(self.dusty.clone()))
             .child(self.enter(div().text_size(px(30.)).font_weight(FontWeight::BLACK).mt(px(2.)).child("Disk checkup"), 0.16))
-            .child(self.enter(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(MUTED)).mt(px(4.)).text_center().child("Dusty sniffs out build leftovers and caches you can safely clear."), 0.2))
+            .child(self.enter(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(pal().muted)).mt(px(4.)).text_center().child("Dusty sniffs out build leftovers and caches you can safely clear."), 0.2))
             .child(
                 card().w_full().mt(px(20.)).p(px(16.)).flex().flex_col().gap(px(10.))
                     .opacity((self.enter_k(0.24) * 1.6).min(1.)).mt(px(20. + 22. * (1. - back_out(self.enter_k(0.24)))))
@@ -957,7 +1049,7 @@ impl DustyApp {
             .child(div().flex_1())
             .child(
                 div().w_full().opacity((self.enter_k(0.3) * 1.6).min(1.)).mt(px(30. * (1. - back_out(self.enter_k(0.3)))))
-                    .child(button("start", "Start checkup", Btn::Primary(GRAPE), true).on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)))),
+                    .child(button("start", "Start checkup", Btn::Primary(pal().grape), true).on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)))),
             )
             .child(self.enter(label_small("Nothing is deleted until you say so."), 0.36).mb(px(18.)).mt(px(2.)))
     }
@@ -970,11 +1062,11 @@ impl DustyApp {
             // fixed-height slot: a one- or two-line bubble never nudges Dusty or the counter
             .child(div().h(px(70.)).flex().items_end().child(bubble(self.bubble.clone(), self.scan.as_ref().map(|s| s.line_i as u64).unwrap_or(0) + self.nav * 1000)))
             .child(div().mt(px(4.)).child(self.dusty.clone()))
-            .child(div().text_size(px(46.)).font_weight(FontWeight::BLACK).text_color(rgb(GRAPE.base)).child(format_bytes(shown as u64)))
+            .child(div().text_size(px(46.)).font_weight(FontWeight::BLACK).text_color(rgb(pal().grape.base)).child(format_bytes(shown as u64)))
             .child(label_small("of leftovers found so far"))
             .child(
-                div().w_full().h(px(10.)).mt(px(16.)).rounded_full().bg(rgb(LINE)).overflow_hidden().relative().child(
-                    div().absolute().top_0().h_full().w(relative(0.3)).rounded_full().bg(rgb(GRAPE.base)).with_animation(
+                div().w_full().h(px(10.)).mt(px(16.)).rounded_full().bg(rgb(pal().line)).overflow_hidden().relative().child(
+                    div().absolute().top_0().h_full().w(relative(0.3)).rounded_full().bg(rgb(pal().grape.base)).with_animation(
                         "scanbar",
                         Animation::new(Duration::from_millis(1300)).repeat().with_easing(ease_in_out),
                         |el, t| el.left(relative(-0.3 + 1.3 * t)),
@@ -983,14 +1075,14 @@ impl DustyApp {
             )
             // latest finds: fixed slots in a fixed-height card, so nothing below ever moves
             .child(
-                card().w_full().mt(px(16.)).h(px(4. * ROW_H + 24.)).px(px(14.)).py(px(10.)).flex().flex_col()
+                card().w_full().mt(px(16.)).h(px(4. * ROW_H + 44.)).overflow_hidden().px(px(14.)).py(px(10.)).flex().flex_col()
                     .child(label_small("Latest finds").mb(px(2.)))
                     .children(chips.into_iter().rev().take(4).enumerate().map(|(i, (id, label, bytes, g))| {
                         let t = tone(g);
-                        let row = div().h(px(ROW_H)).flex_none().flex().items_center().gap(px(10.)).when(i > 0, |d| d.border_t_1().border_color(rgb(LINE)))
+                        let row = div().h(px(ROW_H)).flex_none().flex().items_center().gap(px(10.)).when(i > 0, |d| d.border_t_1().border_color(rgb(pal().line)))
                             .child(div().size(px(24.)).flex_none().rounded(px(8.)).bg(rgb(t.soft)).flex().items_center().justify_center().text_size(px(13.)).child(glyph(g)))
                             .child(div().flex_1().min_w(px(0.)).truncate().text_size(px(14.)).font_weight(FontWeight::BOLD).child(label))
-                            .child(div().flex_none().text_size(px(14.)).font_weight(FontWeight::BLACK).text_color(rgb(t.edge)).child(format_bytes(bytes)))
+                            .child(div().flex_none().text_size(px(14.)).font_weight(FontWeight::BLACK).text_color(rgb(t.text)).child(format_bytes(bytes)))
                             ;
                         if i == 0 {
                             row.with_animation(ElementId::Name(format!("find-{id}").into()), Animation::new(Duration::from_millis(350)).with_easing(ease_out_quint()), |el, k| el.opacity(k)).into_any_element()
@@ -1022,7 +1114,7 @@ impl DustyApp {
                 div().flex().items_center().gap(px(12.)).child(div().flex_none().child(self.dusty.clone())).child(
                     div().flex().flex_col().gap(px(4.)).flex_1().min_w(px(0.))
                         .child(div().text_size(px(28.)).font_weight(FontWeight::BLACK).child(format!("Found {}", format_bytes(total))))
-                        .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(MUTED)).child(self.bubble.clone())),
+                        .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(pal().muted)).child(self.bubble.clone())),
                 ),
             )
             .child(
@@ -1048,7 +1140,7 @@ impl DustyApp {
                             .gap(px(12.))
                             .p(px(14.))
                             .cursor_pointer()
-                            .hover(|s| s.bg(rgb(0xFCFBFF)))
+                            .hover(|s| s.bg(rgb(pal().card_hover)))
                             .on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if !this.expanded.remove(&g) {
@@ -1058,8 +1150,8 @@ impl DustyApp {
                             }))
                             .child(div().size(px(44.)).flex_none().rounded(px(14.)).bg(rgb(t.soft)).flex().items_center().justify_center().text_size(px(22.)).child(glyph(g)))
                             .child(div().flex_1().min_w(px(0.)).flex().flex_col().child(div().text_size(px(17.)).font_weight(FontWeight::BLACK).child(g.name())).child(label_small(format!("{} · {} items", g.blurb(), items.len()))))
-                            .child(div().text_size(px(18.)).font_weight(FontWeight::BLACK).text_color(rgb(t.edge)).child(format_bytes(sum)))
-                            .child(div().text_color(rgb(MUTED)).font_weight(FontWeight::BLACK).child(if open { "▾" } else { "▸" })),
+                            .child(div().text_size(px(18.)).font_weight(FontWeight::BLACK).text_color(rgb(t.text)).child(format_bytes(sum)))
+                            .child(div().text_color(rgb(pal().muted)).font_weight(FontWeight::BLACK).child(if open { "▾" } else { "▸" })),
                     ).when(open, |d| {
                         d.child(div().px(px(16.)).pb(px(14.)).flex().flex_col().gap(px(10.)).children(items.iter().enumerate().map(|(i, x)| {
                             let w = x.bytes as f32 / max as f32;
@@ -1067,10 +1159,10 @@ impl DustyApp {
                                 div().flex().items_center().gap(px(8.)).text_size(px(14.)).font_weight(FontWeight::BOLD)
                                     .child(div().size(px(10.)).flex_none().rounded_full().border_2().border_color(rgb(t.base)).when(x.default_on, |d| d.bg(rgb(t.base))))
                                     .child(div().flex_1().min_w(px(0.)).truncate().child(x.label.clone()))
-                                    .when_some(x.detail.clone(), |d, det| d.child(div().text_color(rgb(MUTED)).text_size(px(12.)).truncate().max_w(px(120.)).child(det)))
+                                    .when_some(x.detail.clone(), |d, det| d.child(div().text_color(rgb(pal().muted)).text_size(px(12.)).truncate().max_w(px(120.)).child(det)))
                                     .child(div().font_weight(FontWeight::BLACK).child(format_bytes(x.bytes))),
                             ).child(
-                                div().h(px(7.)).ml(px(18.)).rounded_full().bg(rgb(LINE)).overflow_hidden().child(
+                                div().h(px(7.)).ml(px(18.)).rounded_full().bg(rgb(pal().line)).overflow_hidden().child(
                                     div().h_full().rounded_full().bg(rgb(t.base)).w(relative(w)).with_animation(
                                         ElementId::NamedInteger(format!("bar-{}", x.id).into(), i as u64),
                                         Animation::new(Duration::from_millis(700)).with_easing(ease_out_quint()),
@@ -1093,8 +1185,8 @@ impl DustyApp {
             .flex_col()
             .child(list)
             .child(
-                div().px(px(22.)).pt(px(10.)).pb(px(16.)).flex().flex_col().gap(px(4.)).border_t_2().border_color(rgb(LINE)).bg(rgb(BG))
-                    .child(button("clean-safe", if safe > 0 { format!("Clean {}", format_bytes(safe)) } else { "Nothing safe to clean".into() }, Btn::Primary(MINT), safe > 0).on_click(cx.listener(|this, _, _, cx| {
+                div().px(px(22.)).pt(px(10.)).pb(px(16.)).flex().flex_col().gap(px(4.)).border_t_2().border_color(rgb(pal().line)).bg(rgb(pal().bg))
+                    .child(button("clean-safe", if safe > 0 { format!("Clean {}", format_bytes(safe)) } else { "Nothing safe to clean".into() }, Btn::Primary(pal().mint), safe > 0).on_click(cx.listener(|this, _, _, cx| {
                         this.selected = this.targets.iter().filter(|t| t.default_on).map(|t| t.id.clone()).collect();
                         this.open_confirm(cx);
                     })))
@@ -1114,8 +1206,8 @@ impl DustyApp {
         let dry = self.dry_run;
         let chip = |id: &'static str, label: &'static str, on: bool| {
             div().id(id).on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick)).px(px(12.)).py(px(7.)).rounded_full().border_2().text_size(px(13.)).font_weight(FontWeight::BLACK).cursor_pointer()
-                .border_color(rgb(if on { GRAPE.base } else { LINE })).bg(rgb(if on { GRAPE.soft } else { CARD })).text_color(rgb(if on { GRAPE.base } else { INK }))
-                .hover(|s| s.border_color(rgb(GRAPE.base)))
+                .border_color(rgb(if on { pal().grape.base } else { pal().line })).bg(rgb(if on { pal().grape.soft } else { pal().card })).text_color(rgb(if on { pal().grape.base } else { pal().ink }))
+                .hover(|s| s.border_color(rgb(pal().grape.base)))
                 .child(label)
         };
         let all_safe = self.selected == self.targets.iter().filter(|t| t.default_on).map(|t| t.id.clone()).collect::<HashSet<_>>();
@@ -1128,7 +1220,7 @@ impl DustyApp {
             .overflow_y_scroll()
             .px(px(22.))
             .child(div().text_size(px(26.)).font_weight(FontWeight::BLACK).child("What should Dusty eat?"))
-            .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(MUTED)).mt(px(2.)).child("Pre-ticked items rebuild themselves. Purple ones cost a download later."))
+            .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(pal().muted)).mt(px(2.)).child("Pre-ticked items rebuild themselves. Purple ones cost a download later."))
             .child(
                 div().flex().flex_wrap().items_center().gap(px(8.)).mt(px(12.))
                     .child(chip("q-safe", "✨ Safe picks", all_safe).on_click(cx.listener(|this, _, _, cx| {
@@ -1153,7 +1245,7 @@ impl DustyApp {
                     })))
                     .child(div().flex_1())
                     .child(
-                        div().id("dry").on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick)).flex().items_center().gap(px(8.)).cursor_pointer().text_size(px(13.)).font_weight(FontWeight::BLACK).text_color(rgb(MUTED))
+                        div().id("dry").on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick)).flex().items_center().gap(px(8.)).cursor_pointer().text_size(px(13.)).font_weight(FontWeight::BLACK).text_color(rgb(pal().muted))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.dry_run = !this.dry_run;
                                 this.bubble = if this.dry_run { "Practice run: I'll only pretend.".into() } else { "For real this time!".into() };
@@ -1161,7 +1253,7 @@ impl DustyApp {
                             }))
                             .child("Practice run")
                             .child(
-                                div().w(px(44.)).h(px(26.)).rounded_full().bg(rgb(if dry { SKY.base } else { LINE })).relative().child(
+                                div().w(px(44.)).h(px(26.)).rounded_full().bg(rgb(if dry { pal().sky.base } else { pal().line })).relative().child(
                                     div().absolute().top(px(3.)).size(px(20.)).rounded_full().bg(rgb(0xFFFFFF)).shadow(vec![BoxShadow { color: alpha(0x000000, 0.12), offset: point(px(0.), px(2.)), blur_radius: px(0.), spread_radius: px(0.) }])
                                         .with_animation(ElementId::NamedInteger("knob".into(), dry as u64), Animation::new(Duration::from_millis(300)), move |el, t| {
                                             let t = back_out(t);
@@ -1180,10 +1272,10 @@ impl DustyApp {
                 div().mt(px(20.)).flex().flex_col().gap(px(10.))
                     .child(
                         div().flex().items_end().gap(px(8.))
-                            .child(div().text_size(px(17.)).font_weight(FontWeight::BLACK).text_color(rgb(t.edge)).child(format!("{} {}", glyph(g), g.name())))
+                            .child(div().text_size(px(17.)).font_weight(FontWeight::BLACK).text_color(rgb(t.text)).child(format!("{} {}", glyph(g), g.name())))
                             .child(div().flex_1().min_w(px(0.)).truncate().child(label_small(g.blurb())))
                             .child(
-                                div().id(ElementId::Name(format!("all-{:?}", g).into())).text_size(px(12.)).font_weight(FontWeight::BLACK).text_color(rgb(t.edge)).cursor_pointer().on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick)).child("ALL")
+                                div().id(ElementId::Name(format!("all-{:?}", g).into())).text_size(px(12.)).font_weight(FontWeight::BLACK).text_color(rgb(t.text)).cursor_pointer().on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick)).child("ALL")
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         let all_on = ids.iter().all(|i| this.selected.contains(i));
                                         for i in &ids {
@@ -1208,38 +1300,38 @@ impl DustyApp {
                             .rounded(px(16.))
                             .border_2()
                             .border_b_4()
-                            .border_color(rgb(if on { t.base } else { LINE }))
-                            .bg(rgb(if on { t.soft } else { CARD }))
+                            .border_color(rgb(if on { t.base } else { pal().line }))
+                            .bg(rgb(if on { t.soft } else { pal().card }))
                             .cursor_pointer()
                             .hover(|s| s.border_color(rgb(t.base)))
                             .active(|s| s.border_b_2().mt(px(2.)))
                             .on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick))
                             .on_click(cx.listener(move |this, _, _, cx| this.toggle(&id, cx)))
                             .child(
-                                div().size(px(26.)).flex_none().rounded(px(8.)).border_2().border_color(rgb(if on { t.base } else { LINE })).bg(rgb(if on { t.base } else { CARD })).flex().items_center().justify_center()
+                                div().size(px(26.)).flex_none().rounded(px(8.)).border_2().border_color(rgb(if on { t.base } else { pal().line })).bg(rgb(if on { t.base } else { pal().card })).flex().items_center().justify_center()
                                     .text_color(rgb(0xFFFFFF)).text_size(px(15.)).font_weight(FontWeight::BLACK)
                                     .when(on, |d| d.child(div().child("✓").with_animation(ElementId::Name(format!("ck-{}", x.id).into()), Animation::new(Duration::from_millis(260)), |el, k| el.opacity(k).text_size(px(6. + 9. * back_out(k)))))),
                             )
                             .child(
                                 div().flex_1().min_w(px(0.)).flex().flex_col()
-                                    .child(div().flex().items_center().gap(px(6.)).child(div().truncate().text_size(px(15.)).font_weight(FontWeight::BLACK).child(x.label.clone())).when(risky, |d| d.child(div().px(px(6.)).rounded(px(6.)).bg(rgb(CORAL.soft)).text_color(rgb(CORAL.edge)).text_size(px(11.)).font_weight(FontWeight::BLACK).child("wipes data"))))
+                                    .child(div().flex().items_center().gap(px(6.)).child(div().truncate().text_size(px(15.)).font_weight(FontWeight::BLACK).child(x.label.clone())).when(risky, |d| d.child(div().px(px(6.)).rounded(px(6.)).bg(rgb(pal().coral.soft)).text_color(rgb(pal().coral.text)).text_size(px(11.)).font_weight(FontWeight::BLACK).child("wipes data"))))
                                     .child(label_small(x.detail.clone().unwrap_or_else(|| if !x.paths.is_empty() { format!("{} paths", x.paths.len()) } else if let Some(c) = x.commands.first() { format!("runs {}", c.cmd) } else { String::new() }))),
                             )
-                            .child(div().font_weight(FontWeight::BLACK).text_color(rgb(if on { t.edge } else { INK })).child(format_bytes(x.bytes)))
+                            .child(div().font_weight(FontWeight::BLACK).text_color(rgb(if on { t.text } else { pal().ink })).child(format_bytes(x.bytes)))
                     }))
             }))
             .child(div().h(px(20.)));
 
         div().flex_1().min_h(px(0.)).flex().flex_col().child(list).child(
-            div().px(px(22.)).pt(px(8.)).pb(px(16.)).border_t_2().border_color(rgb(LINE)).bg(rgb(CARD)).flex().flex_col().gap(px(6.))
+            div().px(px(22.)).pt(px(8.)).pb(px(16.)).border_t_2().border_color(rgb(pal().line)).bg(rgb(pal().card)).flex().flex_col().gap(px(6.))
                 .child(
                     div().flex().items_center().gap(px(10.)).child(div().flex_none().child(self.dusty.clone())).child(
                         div().flex().flex_col().flex_1().min_w(px(0.))
-                            .child(div().flex().items_end().gap(px(6.)).child(div().text_size(px(15.)).font_weight(FontWeight::BLACK).child("Free up")).child(div().text_size(px(24.)).font_weight(FontWeight::BLACK).text_color(rgb(MINT.edge)).child(format_bytes(sel_bytes))).child(label_small(format!("· {sel_n} items"))))
-                            .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(MUTED)).truncate().child(self.bubble.clone())),
+                            .child(div().flex().items_end().gap(px(6.)).child(div().text_size(px(15.)).font_weight(FontWeight::BLACK).child("Free up")).child(div().text_size(px(24.)).font_weight(FontWeight::BLACK).text_color(rgb(pal().mint.text)).child(format_bytes(sel_bytes))).child(label_small(format!("· {sel_n} items"))))
+                            .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(pal().muted)).truncate().child(self.bubble.clone())),
                     ),
                 )
-                .child(button("pick-go", if dry { format!("Practice with {sel_n} items") } else { format!("Clean {sel_n} items") }, Btn::Primary(MINT), sel_n > 0).on_click(cx.listener(|this, _, _, cx| this.open_confirm(cx)))),
+                .child(button("pick-go", if dry { format!("Practice with {sel_n} items") } else { format!("Clean {sel_n} items") }, Btn::Primary(pal().mint), sel_n > 0).on_click(cx.listener(|this, _, _, cx| this.open_confirm(cx)))),
         )
     }
 
@@ -1259,7 +1351,7 @@ impl DustyApp {
             .flex_col()
             .justify_end()
             .child(
-                div().id("sheet-bg").absolute().inset_0().bg(alpha(INK, 0.45)).on_click(cx.listener(|this, _, _, cx| {
+                div().id("sheet-bg").absolute().inset_0().bg(alpha(pal().scrim, pal().scrim_a)).on_click(cx.listener(|this, _, _, cx| {
                     this.confirm = false;
                     cx.notify();
                 }))
@@ -1269,7 +1361,7 @@ impl DustyApp {
                 div()
                     .id("sheet")
                     .relative()
-                    .bg(rgb(CARD))
+                    .bg(rgb(pal().card))
                     .rounded_t(px(28.))
                     .px(px(22.))
                     .pt(px(22.))
@@ -1280,7 +1372,7 @@ impl DustyApp {
                     .gap(px(8.))
                     .child(div().text_size(px(40.)).child(if risky > 0 { "😬" } else if dry { "🧪" } else { "🧹" }))
                     .child(div().text_size(px(22.)).font_weight(FontWeight::BLACK).text_center().child(if dry { format!("Practice with {n} items?") } else { format!("Delete {n} items, about {}?", format_bytes(bytes)) }))
-                    .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(MUTED)).text_center().child(if dry {
+                    .child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(pal().muted)).text_center().child(if dry {
                         "Nothing will be deleted. Dusty just rehearses.".to_string()
                     } else if risky > 0 {
                         format!("{risky} of them wipe real data (not just caches). This can't be undone.")
@@ -1290,7 +1382,7 @@ impl DustyApp {
                         "All of it rebuilds by itself when needed. Nothing personal is touched.".to_string()
                     }))
                     .child(div().h(px(6.)))
-                    .child(button("confirm-go", if dry { "Start practice" } else { "Yes, clean it" }, Btn::Primary(if risky > 0 { CORAL } else { MINT }), true).on_mouse_up(MouseButton::Left, move |_, _, _| if !dry { haptic(Haptic::Double) }).on_click(cx.listener(|this, _, _, cx| this.start_clean(cx))))
+                    .child(button("confirm-go", if dry { "Start practice" } else { "Yes, clean it" }, Btn::Primary(if risky > 0 { pal().coral } else { pal().mint }), true).on_mouse_up(MouseButton::Left, move |_, _, _| if !dry { haptic(Haptic::Double) }).on_click(cx.listener(|this, _, _, cx| this.start_clean(cx))))
                     .child(button("confirm-no", "Not yet", Btn::Ghost, true).on_click(cx.listener(|this, _, _, cx| {
                         this.confirm = false;
                         cx.notify();
@@ -1313,9 +1405,9 @@ impl DustyApp {
         let remaining = n.saturating_sub(job.next + 1 + usize::from(flying));
         let item_card = |t: &Target| {
             let tn = tone(t.group);
-            div().flex().items_center().gap(px(10.)).px(px(14.)).py(px(10.)).rounded(px(16.)).bg(rgb(CARD)).border_2().border_b_4().border_color(rgb(tn.base))
+            div().flex().items_center().gap(px(10.)).px(px(14.)).py(px(10.)).rounded(px(16.)).bg(rgb(pal().card)).border_2().border_b_4().border_color(rgb(tn.base))
                 .child(div().size(px(34.)).flex_none().rounded(px(10.)).bg(rgb(tn.soft)).flex().items_center().justify_center().text_size(px(17.)).child(glyph(t.group)))
-                .child(div().flex().flex_col().min_w(px(0.)).child(div().text_size(px(15.)).font_weight(FontWeight::BLACK).truncate().max_w(px(200.)).child(t.label.clone())).child(div().text_size(px(12.)).font_weight(FontWeight::BLACK).text_color(rgb(tn.edge)).child(format_bytes(t.bytes))))
+                .child(div().flex().flex_col().min_w(px(0.)).child(div().text_size(px(15.)).font_weight(FontWeight::BLACK).truncate().max_w(px(200.)).child(t.label.clone())).child(div().text_size(px(12.)).font_weight(FontWeight::BLACK).text_color(rgb(tn.text)).child(format_bytes(t.bytes))))
         };
 
         let mut col = self.page().items_center().relative();
@@ -1338,9 +1430,9 @@ impl DustyApp {
             )
             .child(div().mt(px(6.)).child(self.dusty.clone()))
             .child(bubble(self.bubble.clone(), job.next as u64 + 7777))
-            .child(div().text_size(px(46.)).font_weight(FontWeight::BLACK).text_color(rgb(MINT.edge)).mt(px(8.)).child(format_bytes(job.shown as u64)))
+            .child(div().text_size(px(46.)).font_weight(FontWeight::BLACK).text_color(rgb(pal().mint.text)).mt(px(8.)).child(format_bytes(job.shown as u64)))
             .child(label_small(if job.dry { "would be freed (practice run)" } else { "eaten so far" }))
-            .child(div().w_full().mt(px(12.)).child(progress_bar(job.shown_progress, MINT)))
+            .child(div().w_full().mt(px(12.)).child(progress_bar(job.shown_progress, pal().mint)))
             .child(label_small(format!("{} of {}", job.next.min(n), n)).mt(px(6.)));
 
         // the flying item: an arc from the plate into Dusty's mouth, shrinking as it goes
@@ -1376,8 +1468,8 @@ impl DustyApp {
                 let w = 210. * s;
                 d.child(
                     div().absolute().left(px(x - w / 2.)).top(px(y - TOP - 26. * s)).w(px(w)).opacity((1.4 - p).min(1.)).child(
-                        div().flex().items_center().gap(px(8. * s)).px(px(12. * s)).py(px(10. * s)).rounded(px(16. * s)).bg(rgb(CARD)).border_2().border_b_4().border_color(rgb(tn.base))
-                            .shadow(vec![BoxShadow { color: alpha(INK, 0.15), offset: point(px(0.), px(8. * s)), blur_radius: px(16. * s), spread_radius: px(0.) }])
+                        div().flex().items_center().gap(px(8. * s)).px(px(12. * s)).py(px(10. * s)).rounded(px(16. * s)).bg(rgb(pal().card)).border_2().border_b_4().border_color(rgb(tn.base))
+                            .shadow(vec![BoxShadow { color: alpha(pal().scrim, pal().scrim_a / 3.), offset: point(px(0.), px(8. * s)), blur_radius: px(16. * s), spread_radius: px(0.) }])
                             .child(div().text_size(px(18. * s)).child(glyph(t.group)))
                             .child(div().text_size(px((15. * s).max(5.))).font_weight(FontWeight::BLACK).truncate().child(t.label.clone())),
                     ),
@@ -1386,7 +1478,7 @@ impl DustyApp {
             .children(popups.into_iter().map(|(text, x, y, age)| {
                 let k = (age / 1.1).min(1.);
                 div().absolute().left(px(x - 60.)).w(px(120.)).top(px(y - TOP - 150. - 50. * k)).flex().justify_center().opacity(1. - k * k)
-                    .child(div().text_size(px(20.)).font_weight(FontWeight::BLACK).text_color(rgb(MINT.edge)).child(text))
+                    .child(div().text_size(px(20.)).font_weight(FontWeight::BLACK).text_color(rgb(pal().mint.text)).child(text))
             }))
             .into_any_element()
     }
@@ -1404,7 +1496,7 @@ impl DustyApp {
             let start = delay as f32 / total as f32;
             div().flex_1().flex_basis(px(0.)).rounded(px(18.)).bg(rgb(t.base)).border_2().border_b_4().border_color(rgb(t.base)).flex().flex_col()
                 .child(div().rounded_t(px(16.)).bg(rgb(t.base)).py(px(5.)).flex().justify_center().text_color(rgb(0xFFFFFF)).text_size(px(12.)).font_weight(FontWeight::BLACK).child(label.to_uppercase()))
-                .child(div().rounded(px(14.)).bg(rgb(CARD)).py(px(10.)).flex().justify_center().text_size(px(22.)).font_weight(FontWeight::BLACK).text_color(rgb(t.edge)).child(value))
+                .child(div().rounded(px(14.)).bg(rgb(pal().card)).py(px(10.)).flex().justify_center().text_size(px(22.)).font_weight(FontWeight::BLACK).text_color(rgb(t.text)).child(value))
                 .with_animation(ElementId::NamedInteger("stat".into(), nav * 10 + i), Animation::new(Duration::from_millis(total)), move |el, k| {
                     let k = ((k - start) / (1. - start)).clamp(0., 1.);
                     el.opacity(k).mt(px(14. * (1. - back_out(k))))
@@ -1423,13 +1515,13 @@ impl DustyApp {
                 div().flex().flex_col().items_center()
                     .child(bubble(self.bubble.clone(), nav))
                     .child(div().mt(px(4.)).child(self.dusty.clone()))
-                    .child(div().text_size(px(15.)).font_weight(FontWeight::BLACK).text_color(rgb(MUTED)).child(if job_dry { "Would free" } else if estimated { "Freed (estimated)" } else { "Freed" }))
-                    .child(div().text_size(px(52.)).font_weight(FontWeight::BLACK).text_color(rgb(MINT.edge)).child(format_bytes(freed))),
+                    .child(div().text_size(px(15.)).font_weight(FontWeight::BLACK).text_color(rgb(pal().muted)).child(if job_dry { "Would free" } else if estimated { "Freed (estimated)" } else { "Freed" }))
+                    .child(div().text_size(px(52.)).font_weight(FontWeight::BLACK).text_color(rgb(pal().mint.text)).child(format_bytes(freed))),
             )
-            .child(div().flex().gap(px(10.)).mt(px(12.)).child(stat("Free space now", format_bytes(disk.free), MINT, 100, 0)).child(stat("Items cleaned", ok.to_string(), SKY, 220, 1)))
+            .child(div().flex().gap(px(10.)).mt(px(12.)).child(stat("Free space now", format_bytes(disk.free), pal().mint, 100, 0)).child(stat("Items cleaned", ok.to_string(), pal().sky, 220, 1)))
             .when(!failed.is_empty(), |d| {
                 d.child(
-                    div().mt(px(12.)).p(px(14.)).rounded(px(16.)).bg(rgb(SUN.soft)).text_color(rgb(0x8A6000)).text_size(px(14.)).font_weight(FontWeight::BOLD).flex().flex_col().gap(px(4.))
+                    div().mt(px(12.)).p(px(14.)).rounded(px(16.)).bg(rgb(pal().sun.soft)).text_color(rgb(pal().warn)).text_size(px(14.)).font_weight(FontWeight::BOLD).flex().flex_col().gap(px(4.))
                         .child(div().font_weight(FontWeight::BLACK).child(format!("{} item(s) were busy", failed.len())))
                         .children(failed.iter().take(4).map(|(l, e)| div().truncate().child(format!("{l}: {e}"))))
                         .child(div().child("Something was using them. Try again later, no hard feelings.")),
@@ -1440,20 +1532,20 @@ impl DustyApp {
                     .child(div().text_size(px(17.)).font_weight(FontWeight::BLACK).mb(px(6.)).child("Worth checking by hand"))
                     .children(HINTS.iter().enumerate().map(|(i, (t, d))| {
                         let on = self.hints_done.contains(&i);
-                        div().id(("hint", i)).on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick)).flex().items_center().gap(px(10.)).py(px(8.)).border_t_2().border_color(rgb(if i == 0 { CARD } else { LINE })).cursor_pointer()
+                        div().id(("hint", i)).on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick)).flex().items_center().gap(px(10.)).py(px(8.)).border_t_2().border_color(rgb(if i == 0 { pal().card } else { pal().line })).cursor_pointer()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if !this.hints_done.remove(&i) {
                                     this.hints_done.insert(i);
                                 }
                                 cx.notify();
                             }))
-                            .child(div().size(px(22.)).flex_none().rounded_full().border_2().border_color(rgb(if on { MINT.base } else { LINE })).bg(rgb(if on { MINT.base } else { CARD })).flex().items_center().justify_center().text_color(rgb(0xFFFFFF)).text_size(px(12.)).font_weight(FontWeight::BLACK).when(on, |d| d.child("✓")))
-                            .child(div().flex().flex_col().min_w(px(0.)).child(div().text_size(px(15.)).font_weight(FontWeight::BLACK).text_color(rgb(if on { MUTED } else { INK })).when(on, |d| d.line_through()).child(*t)).child(label_small(*d)))
+                            .child(div().size(px(22.)).flex_none().rounded_full().border_2().border_color(rgb(if on { pal().mint.base } else { pal().line })).bg(rgb(if on { pal().mint.base } else { pal().card })).flex().items_center().justify_center().text_color(rgb(0xFFFFFF)).text_size(px(12.)).font_weight(FontWeight::BLACK).when(on, |d| d.child("✓")))
+                            .child(div().flex().flex_col().min_w(px(0.)).child(div().text_size(px(15.)).font_weight(FontWeight::BLACK).text_color(rgb(if on { pal().muted } else { pal().ink })).when(on, |d| d.line_through()).child(*t)).child(label_small(*d)))
                     })),
             )
             .child(div().h(px(14.)));
         div().flex_1().min_h(px(0.)).flex().flex_col().child(list).child(
-            div().px(px(22.)).pt(px(10.)).pb(px(16.)).border_t_2().border_color(rgb(LINE)).child(button("done-home", "Done", Btn::Primary(MINT), true).on_click(cx.listener(|this, _, _, cx| {
+            div().px(px(22.)).pt(px(10.)).pb(px(16.)).border_t_2().border_color(rgb(pal().line)).child(button("done-home", "Done", Btn::Primary(pal().mint), true).on_click(cx.listener(|this, _, _, cx| {
                 this.clean = None;
                 this.targets.clear();
                 this.enter_home(cx);
@@ -1496,7 +1588,7 @@ impl DustyApp {
                 canvas(
                     |_, _, _| {},
                     move |_, _, window, _| {
-                        let purple = rgb(GRAPE.base);
+                        let purple = rgb(pal().grape.base);
                         if radius < 1. {
                             window.paint_quad(fill(Bounds::new(point(px(0.), px(0.)), size(px(vw), px(vh))), purple));
                         } else {
@@ -1547,11 +1639,11 @@ impl DustyApp {
                         .size(px(badge))
                         .rounded_full()
                         .bg(rgb(0xFFFFFF))
-                        .shadow(vec![BoxShadow { color: alpha(GRAPE.edge, 0.6), offset: point(px(0.), px(badge * 0.06)), blur_radius: px(0.), spread_radius: px(0.) }])
+                        .shadow(vec![BoxShadow { color: alpha(pal().grape.edge, 0.6), offset: point(px(0.), px(badge * 0.06)), blur_radius: px(0.), spread_radius: px(0.) }])
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_color(rgb(GRAPE.base))
+                        .text_color(rgb(pal().grape.base))
                         .text_size(px(badge * 0.5))
                         .font_weight(FontWeight::BLACK)
                         .child("✦"),

@@ -166,7 +166,7 @@ fn main() {
                 app_id: Some("io.github.deuspheara.dusty".into()),
                 ..Default::default()
             },
-            |_, cx| cx.new(ui::DustyApp::new),
+            |window, cx| cx.new(|cx| ui::DustyApp::new(window, cx)),
         )
         .expect("open window");
         cx.activate(true);

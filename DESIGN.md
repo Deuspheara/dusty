@@ -43,8 +43,30 @@ Tones, each with `base / edge / soft`:
 | Blue | `#5B8DEF` | `#3F6FD1` | `#E6EEFF` | Docker |
 | Mint | `#22C993` | `#169E72` | `#DFF8EE` | success, space freed |
 
-The website (`site/`) is the night version: plum background `#17112B`, surfaces `#251C44`, lines `#3A2F63`, and the
-same tones. App screenshots stay light, so they read like windows glowing in the dark.
+### Dark mode
+
+The app follows the macOS appearance (`window.appearance()`), and switches live when System Settings changes it.
+`DUSTY_APPEARANCE=dark|light` pins it, which is handy for screenshots. Both palettes live in `ui.rs` (`LIGHT`, `DARK`):
+
+| Token | Light | Dark |
+|---|---|---|
+| `bg` | `#FFFBF5` | `#17112B` |
+| `card` | `#FFFFFF` | `#251C44` |
+| `line` | `#E8E4F3` | `#3A2F63` |
+| `ink` | `#2B2340` | `#F7F2FF` |
+| `muted` | `#8A84A3` | `#B6ACD9` |
+
+At night the tone bases stay vivid. Each tone gets a `text` color, lifted toward white so sizes and group names stay
+readable on plum cards (coral `#FF8897`, sun `#FFD773`, mint `#60D8B1`…). `soft` becomes the base at about 22% over
+the card, and button edges get darker so the chunky press still reads.
+
+The website (`site/`) follows the visitor's system appearance, like the app: the light palette by day, and by night
+the same plum tokens as the app (`#17112B` background, `#251C44` cards, lifted tone text such as mint `#60D8B1`). App
+screenshots stay light, so at night they read like windows glowing in the dark. It tells one story as you scroll:
+"The Red Bar". A nearly full
+storage bar is the villain. Dusty starts worried under it, sniffs, finds 77.9 GB, refuses a `src/` chip, then eats
+the safe segments one block at a time until 18.2 GB are free. His poses come from `site/img/moods/`, which holds the
+sheet's five expressions plus the front, three-quarter and back views cut out as transparent PNGs.
 
 ## Type
 
@@ -86,7 +108,8 @@ the 512 px PNGs embedded in the app, and `app/assets/Dusty.icns`.
 - Springs over easing curves. Things pop, hop and settle.
 - The splash is under a second (badge pop, dust sweep, iris onto Dusty) and a click skips it.
 - Dusty runs at 60 fps while moving, 30 while breathing and 12 when the window isn't focused.
-- On the web, dust drifts slowly and the disk bar fills in once. Both stop under `prefers-reduced-motion`.
+- On the web, scrolling scrubs the story: blocks arc into Dusty's mouth, he squashes on each chomp, and confetti
+  fires once at the end. Under `prefers-reduced-motion` the page shows the finished state without motion.
 
 ## Voice
 
