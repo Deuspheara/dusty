@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/brand/dusty-icon.png" width="128" height="128" alt="Dusty app icon: a paw print with pink toe beans">
+<img src="assets/brand/dusty-icon.png" width="128" height="128" alt="Dusty app icon: Dusty the cat peeking over the edge">
 
 # Dusty
 

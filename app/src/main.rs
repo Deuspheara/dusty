@@ -10,7 +10,32 @@ use std::borrow::Cow;
 
 use gpui::*;
 
-actions!(dusty, [Quit]);
+actions!(dusty, [Quit, IconPurple, IconMint, IconCream]);
+
+/// The Dusty menu, with the current icon color ticked.
+fn menus(current: platform::IconVariant) -> Vec<Menu> {
+    let item = |v: platform::IconVariant| {
+        let name = if v == current { format!("✓ {}", v.label()) } else { format!("    {}", v.label()) };
+        match v {
+            platform::IconVariant::Purple => MenuItem::action(name, IconPurple),
+            platform::IconVariant::Mint => MenuItem::action(name, IconMint),
+            platform::IconVariant::Cream => MenuItem::action(name, IconCream),
+        }
+    };
+    vec![Menu {
+        name: "Dusty".into(),
+        items: vec![
+            MenuItem::submenu(Menu { name: "App Icon".into(), items: platform::IconVariant::ALL.into_iter().map(item).collect() }),
+            MenuItem::separator(),
+            MenuItem::action("Quit Dusty", Quit),
+        ],
+    }]
+}
+
+fn set_icon(v: platform::IconVariant, cx: &mut App) {
+    platform::apply_icon(v, true);
+    cx.set_menus(menus(v));
+}
 
 pub static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
@@ -117,7 +142,14 @@ fn main() {
         }
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("cmd-w", Quit, None)]);
         cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.set_menus(vec![Menu { name: "Dusty".into(), items: vec![MenuItem::action("Quit Dusty", Quit)] }]);
+        cx.on_action(|_: &IconPurple, cx| set_icon(platform::IconVariant::Purple, cx));
+        cx.on_action(|_: &IconMint, cx| set_icon(platform::IconVariant::Mint, cx));
+        cx.on_action(|_: &IconCream, cx| set_icon(platform::IconVariant::Cream, cx));
+        let icon = platform::saved_icon();
+        if icon != platform::IconVariant::Purple {
+            platform::apply_icon(icon, false);
+        }
+        cx.set_menus(menus(icon));
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 cx.quit();

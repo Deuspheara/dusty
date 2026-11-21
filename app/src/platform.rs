@@ -77,3 +77,95 @@ pub fn haptic(kind: Haptic) {
 
 #[cfg(not(target_os = "macos"))]
 pub fn haptic(_kind: Haptic) {}
+
+// ───────────────────────── app icon variants ─────────────────────────
+
+/// Icon colors the user can pick from the Dusty → Icon menu. The bundle icon (Finder) stays purple;
+/// the choice changes the Dock icon while Dusty runs and is remembered in user defaults.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IconVariant {
+    Purple,
+    Mint,
+    Cream,
+}
+
+impl IconVariant {
+    pub const ALL: [IconVariant; 3] = [IconVariant::Purple, IconVariant::Mint, IconVariant::Cream];
+    pub fn key(self) -> &'static str {
+        match self {
+            IconVariant::Purple => "purple",
+            IconVariant::Mint => "mint",
+            IconVariant::Cream => "cream",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            IconVariant::Purple => "Purple",
+            IconVariant::Mint => "Mint",
+            IconVariant::Cream => "Cream",
+        }
+    }
+    fn png(self) -> &'static [u8] {
+        match self {
+            IconVariant::Purple => include_bytes!("../assets/icons/purple.png"),
+            IconVariant::Mint => include_bytes!("../assets/icons/mint.png"),
+            IconVariant::Cream => include_bytes!("../assets/icons/cream.png"),
+        }
+    }
+}
+
+const ICON_PREF: &str = "iconVariant";
+
+#[cfg(target_os = "macos")]
+fn ns_string(s: &str) -> *mut objc::runtime::Object {
+    use objc::{class, msg_send, sel, sel_impl};
+    let c = std::ffi::CString::new(s).unwrap();
+    unsafe { msg_send![class!(NSString), stringWithUTF8String: c.as_ptr()] }
+}
+
+/// The saved icon choice (purple when nothing is saved).
+#[cfg(target_os = "macos")]
+pub fn saved_icon() -> IconVariant {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    unsafe {
+        let defaults: *mut Object = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        let v: *mut Object = msg_send![defaults, stringForKey: ns_string(ICON_PREF)];
+        if v.is_null() {
+            return IconVariant::Purple;
+        }
+        let p: *const std::os::raw::c_char = msg_send![v, UTF8String];
+        let s = std::ffi::CStr::from_ptr(p).to_string_lossy();
+        IconVariant::ALL.into_iter().find(|i| i.key() == s).unwrap_or(IconVariant::Purple)
+    }
+}
+
+/// Show `icon` in the Dock now and remember it for next launch.
+#[cfg(target_os = "macos")]
+pub fn apply_icon(icon: IconVariant, save: bool) {
+    use objc::runtime::Object;
+    use objc::{class, msg_send, sel, sel_impl};
+    unsafe {
+        let bytes = icon.png();
+        let data: *mut Object = msg_send![class!(NSData), dataWithBytes: bytes.as_ptr() length: bytes.len()];
+        let img: *mut Object = msg_send![class!(NSImage), alloc];
+        let img: *mut Object = msg_send![img, initWithData: data];
+        if !img.is_null() {
+            let app: *mut Object = msg_send![class!(NSApplication), sharedApplication];
+            let _: () = msg_send![app, setApplicationIconImage: img];
+            let _: () = msg_send![img, release];
+        }
+        if save {
+            let defaults: *mut Object = msg_send![class!(NSUserDefaults), standardUserDefaults];
+            let _: () = msg_send![defaults, setObject: ns_string(icon.key()) forKey: ns_string(ICON_PREF)];
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn saved_icon() -> IconVariant {
+    IconVariant::Purple
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn apply_icon(_icon: IconVariant, _save: bool) {}

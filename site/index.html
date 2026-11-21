@@ -8,7 +8,7 @@
 <meta property="og:title" content="Dusty: a tidy Mac, one crumb at a time">
 <meta property="og:description" content="A playful macOS disk cleaner. Build folders, dev caches, app junk. Never your code.">
 <meta property="og:image" content="https://deuspheara.github.io/dusty/img/og.png">
-<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="icon" href="img/icon.png" type="image/png">
 <link rel="apple-touch-icon" href="img/icon.png">
 <style>
   :root {
@@ -32,7 +32,9 @@
     --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+  .skip { position: absolute; left: 12px; top: -60px; z-index: 10; background: var(--sun); color: #1A1430; padding: 10px 16px; border-radius: 10px; font-weight: 800; }
+  .skip:focus { top: 12px; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 17px/1.6 var(--text); -webkit-font-smoothing: antialiased; overflow-x: hidden;
@@ -88,20 +90,14 @@
     box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 40px 80px -20px rgba(0,0,0,.6);
     transform: rotate(2deg);
   }
-  .peek {
-    position: absolute; width: 170px; left: -120px; bottom: 40px; transform: rotate(-8deg);
-    filter: drop-shadow(0 14px 18px rgba(0,0,0,.35));
-    transition: transform .3s cubic-bezier(.3,1.6,.5,1);
-  }
-  .stage:hover .peek { transform: rotate(-4deg) translateY(-14px); }
-  .bubble {
-    position: absolute; left: -150px; top: 70px; background: var(--cream); color: #2B2340;
-    padding: 12px 18px; border-radius: 18px; font: 800 15px var(--round);
-    box-shadow: 0 4px 0 #E8E4F3;
-  }
-  .bubble::after {
-    content: ""; position: absolute; left: 50px; bottom: -9px; width: 18px; height: 18px;
-    background: var(--cream); transform: rotate(45deg); border-radius: 3px;
+  /* crumbs Dusty is sweeping off the window, one color per kind of mess */
+  .crumbs { position: absolute; inset: 0; pointer-events: none; }
+  .crumbs i { position: absolute; width: 14px; height: 14px; border-radius: 4px; opacity: 0; }
+  .js .crumbs i { animation: sweep 4.2s ease-in infinite; }
+  @keyframes sweep {
+    0% { opacity: 0; transform: translate(0, 0) rotate(0); }
+    12% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-150px, 70px) rotate(-200deg); }
   }
 
   /* signature: the disk bar */
@@ -116,8 +112,7 @@
   }
   .bar .used { background: #4A3F72; color: var(--muted); }
   .bar .optin { background: repeating-linear-gradient(135deg, var(--grape) 0 8px, #6E55E0 8px 16px); color: #fff; }
-  .js .bar span:not(.used) { animation: eat 1s ease-out both; animation-play-state: paused; }
-  .js .disk.go .bar span:not(.used) { animation-play-state: running; }
+  .disk.go .bar span { animation: eat 1s ease-out both; }
   @keyframes eat { from { transform: scaleX(0); } }
   .legend { display: flex; flex-wrap: wrap; gap: 10px 22px; list-style: none; padding: 0; margin: 0; font-size: 14px; color: var(--muted); }
   .legend li { display: flex; align-items: center; gap: 8px; }
@@ -139,8 +134,9 @@
     width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; font-size: 24px;
     background: color-mix(in srgb, var(--c) 22%, transparent);
   }
+  .dish .glyph svg { width: 26px; height: 26px; fill: none; stroke: var(--c); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .dish h3 { font: 900 21px var(--round); margin: 16px 0 6px; display: flex; align-items: center; gap: 10px; }
-  .tag { font: 800 11px var(--round); letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, var(--c) 25%, transparent); color: var(--c); }
+  .tag { font: 800 12px var(--round); letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; background: var(--c); color: #fff; }
   .dish p { margin: 0; color: var(--muted); font-size: 15px; }
 
   .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
@@ -182,10 +178,9 @@
     .hero, .rules, .cli { grid-template-columns: 1fr; }
     .menu, .steps { grid-template-columns: 1fr 1fr; }
     .stage { margin-top: 20px; }
-    .peek { left: -40px; width: 120px; }
-    .bubble { left: -30px; top: -30px; }
     .rules .happy { position: static; width: 180px; }
-    nav { display: none; }
+    nav { gap: 16px; font-size: 14px; }
+    nav a:nth-child(2) { display: none; }
   }
   @media (max-width: 600px) {
     .menu, .steps { grid-template-columns: 1fr; }
@@ -195,18 +190,20 @@
     .bar span { font-size: 0; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .dust i, .js .bar span { animation: none !important; }
-    .btn, .peek { transition: none; }
+    .dust i, .disk.go .bar span { animation: none !important; }
+    .btn { transition: none; }
+    .js .crumbs i { animation: none; opacity: .8; }
   }
 </style>
 </head>
 <body>
 <script>document.documentElement.classList.add('js')</script>
+<a class="skip" href="#menu">Skip to what Dusty cleans</a>
 <div class="dust" aria-hidden="true"></div>
 
 <header>
   <div class="wrap">
-    <a class="brand" href="#top"><img src="img/icon.svg" alt="">Dusty</a>
+    <a class="brand" href="#top"><img src="img/icon.png" alt="">Dusty</a>
     <nav aria-label="Sections">
       <a href="#menu">What it cleans</a>
       <a href="#how">How it works</a>
@@ -216,7 +213,7 @@
   </div>
 </header>
 
-<main id="top">
+<main id="top" tabindex="-1">
   <div class="wrap">
     <div class="hero">
       <div>
@@ -234,8 +231,14 @@
       </div>
       <div class="stage">
         <div class="window"><img src="img/screen-home.png" width="550" height="1000" alt="Dusty's home screen: a disk checkup card showing free space and a Start checkup button"></div>
-        <div class="bubble">Psst… I smell build folders.</div>
-        <img class="peek" src="img/dusty.png" alt="">
+        <div class="crumbs" aria-hidden="true">
+          <i style="left: 8px; top: 58%; background: var(--coral)"></i>
+          <i style="left: 2px; top: 66%; background: var(--sun); animation-delay: .7s"></i>
+          <i style="left: 14px; top: 74%; background: var(--sky); animation-delay: 1.4s; width: 10px; height: 10px"></i>
+          <i style="left: 4px; top: 82%; background: var(--teal); animation-delay: 2.1s"></i>
+          <i style="left: 18px; top: 62%; background: var(--blue); animation-delay: 2.8s; width: 10px; height: 10px"></i>
+          <i style="left: 10px; top: 78%; background: var(--grape); animation-delay: 3.5s"></i>
+        </div>
       </div>
     </div>
 
@@ -247,14 +250,15 @@
       <div class="bar" role="img" aria-label="Leftovers found: build folders 9.5 GB, dev caches 8.1 GB, app caches 0.7 GB, re-downloadable 59.7 GB">
         <span style="flex: 9.5; background: var(--coral); animation-delay: .05s">9.5 GB</span>
         <span style="flex: 8.1; background: var(--sun); animation-delay: .15s">8.1 GB</span>
-        <span style="flex: 1.2; background: var(--sky); animation-delay: .25s"></span>
+        <span style="flex: 0.7; background: var(--sky); animation-delay: .25s"></span>
         <span class="optin" style="flex: 59.7; animation-delay: .35s">59.7 GB, only if you say so</span>
       </div>
       <ul class="legend">
-        <li><b style="background: var(--coral)"></b>Build folders</li>
-        <li><b style="background: var(--sun)"></b>Dev tool caches</li>
-        <li><b style="background: var(--sky)"></b>App caches</li>
-        <li><b style="background: var(--grape)"></b>Re-downloadable (off by default)</li>
+        <li><b style="background: var(--coral)"></b>Build folders · 9.5 GB</li>
+        <li><b style="background: var(--sun)"></b>Dev tool caches · 8.1 GB</li>
+        <li><b style="background: var(--sky)"></b>App caches · 0.7 GB</li>
+        <li><b style="background: var(--grape)"></b>Re-downloadable, off by default · 59.7 GB</li>
+        <li>No junk or Docker leftovers on this one.</li>
       </ul>
     </div>
 
@@ -265,32 +269,32 @@
       </div>
       <div class="menu">
         <article class="dish" style="--c: var(--coral)">
-          <div class="glyph" aria-hidden="true">🧱</div>
+          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7h18v5H3zM3 12h18v5H3zM9 7v5M15 12v5M6 17v0"/><path d="M5 20l1-3M12 20l-1-3M18 20l1-3" /></svg></div>
           <h3>Build folders</h3>
           <p>Flutter <code>build/</code>, Gradle <code>.gradle/</code>, Rust <code>target/</code>, SwiftPM <code>.build/</code>, <code>.next</code>, <code>dist</code>, <code>__pycache__</code>, CMake, Zig.</p>
         </article>
         <article class="dish" style="--c: var(--sun)">
-          <div class="glyph" aria-hidden="true">🗄️</div>
+          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2.5"/><path d="M4 12h16M10 7.5h4M10 16.5h4"/></svg></div>
           <h3>Dev caches</h3>
           <p>Xcode DerivedData and DeviceSupport, unavailable simulators, Gradle transforms, emulator snapshots, old IDE versions, Homebrew.</p>
         </article>
         <article class="dish" style="--c: var(--sky)">
-          <div class="glyph" aria-hidden="true">🌐</div>
+          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 9h18M6.5 6.5h.01M9 6.5h.01"/><path d="M8 14.5l2.5 2.5L16 12"/></svg></div>
           <h3>App caches</h3>
           <p>Browser, chat and media caches. An app that's open is left alone until you quit it.</p>
         </article>
         <article class="dish" style="--c: var(--teal)">
-          <div class="glyph" aria-hidden="true">🧾</div>
+          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 21z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg></div>
           <h3>Junk &amp; logs</h3>
           <p>Old logs and crash reports, unfinished downloads, stale Mail attachment copies.</p>
         </article>
         <article class="dish" style="--c: var(--blue)">
-          <div class="glyph" aria-hidden="true">🐳</div>
+          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="11" rx="2"/><path d="M7 7v11M11 7v11M15 7v11M19 7v11M8 4h8"/></svg></div>
           <h3>Docker</h3>
           <p>Build cache and stopped containers. Images and volumes are yours to opt into.</p>
         </article>
         <article class="dish" style="--c: var(--grape)">
-          <div class="glyph" aria-hidden="true">📦</div>
+          <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.4 1.5A3.5 3.5 0 0 1 17 18"/><path d="M12 11v9M9 17l3 3 3-3"/></svg></div>
           <h3>Re-downloadable <span class="tag">opt-in</span></h3>
           <p><code>node_modules</code>, <code>.venv</code>, Pods, package caches, old toolchains and simulator runtimes. Off until you tick them.</p>
         </article>
@@ -335,7 +339,7 @@
               <div><strong>Busy apps are skipped</strong><span>If Slack, a browser or Figma is open, its cache stays put and Dusty tells you why.</span></div></li>
             <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#FF5A6E" opacity=".2"/><path d="M11 11l12 12M23 11L11 23" stroke="#FF5A6E" stroke-width="3" stroke-linecap="round"/></svg>
               <div><strong>Some caches aren't caches</strong><span>Offline music, password managers, cloud sync, VPNs and virtual machines keep real data there, so Dusty doesn't touch them.</span></div></li>
-            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#8B6EFF" opacity=".25"/><path d="M11 17h12M17 11v12" stroke="#B9A8FF" stroke-width="3" stroke-linecap="round" transform="rotate(45 17 17)"/></svg>
+            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#8B6EFF" opacity=".25"/><path d="M13 18v-7a1.5 1.5 0 0 1 3 0v5M16 15V9.5a1.5 1.5 0 0 1 3 0V16M19 16v-4a1.5 1.5 0 0 1 3 0v6a7 7 0 0 1-7 7h-1a6 6 0 0 1-5-3l-2.5-4a1.5 1.5 0 0 1 2.5-1.6L13 18" stroke="#B9A8FF" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(-1 -3)"/></svg>
               <div><strong>Nothing goes until you say so</strong><span>Every clean ends at a confirm screen. Practice run shows the whole thing with zero deletes.</span></div></li>
           </ul>
         </div>
@@ -358,17 +362,18 @@
     </section>
 
     <div class="last">
-      <img src="img/icon.svg" alt="">
+      <img src="img/icon.png" alt="">
       <h2>Give Dusty a snack.</h2>
-      <p>Free, open source, and it purrs on Apple silicon.</p>
+      <p>Free and open source, for Apple silicon and Intel Macs.</p>
       <a class="btn btn-primary" href="https://github.com/Deuspheara/dusty/releases/latest">Download for Mac</a>
+      <p class="fine">macOS 13 or later · MIT license · no account, no tracking</p>
     </div>
   </div>
 </main>
 
 <footer>
   <div class="wrap">
-    <span>Dusty is MIT licensed. Made with a lint roller and Rust.</span>
+    <span>Dusty is MIT licensed. The app is Rust, the CLI is TypeScript, the cat is a good cat.</span>
     <a href="https://github.com/Deuspheara/dusty">github.com/Deuspheara/dusty</a>
   </div>
 </footer>

@@ -24,6 +24,7 @@ open target/Dusty.app
   (`open --env DUSTY_FORCE_DRY=1 target/Dusty.app`). `Dusty --scan` prints a headless scan, `Dusty --bench` measures Dusty (CPU vs GPU), `DUSTY_TRACE=1` logs
   frame rates and startup time.
 - Builds without Xcode's Metal toolchain (GPUI `runtime_shaders`).
+- **App icon:** *Dusty → App Icon* switches the Dock icon between purple, mint and cream (saved in user defaults).
 - **Haptics:** on Force Touch trackpads, primary buttons give a firm click, toggles/checkboxes a soft tick,
   the destructive confirm a double, and each item Dusty eats a tick.
 

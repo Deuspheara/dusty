@@ -4,7 +4,7 @@ Dusty should feel like a friendly pet that tidies up, not a system utility. The 
 precise and the copy is honest about what gets deleted.
 
 <p align="center">
-  <img src="assets/brand/dusty-icon.png" width="96" alt="App icon">
+  <img src="assets/brand/dusty-icon.png" width="96" alt="App icon: Dusty peeking">
   &nbsp;&nbsp;
   <img src="site/img/dusty.png" width="110" alt="Dusty, front pose">
   &nbsp;&nbsp;
@@ -67,22 +67,19 @@ No web fonts. The app uses `.SystemUIFont` with `FontWeight::BLACK` for display.
 
 ## App icon
 
-`assets/brand/dusty-icon.svg` is the master. A cream paw with pink toe beans on a grape squircle, a sun-colored
-sparkle (clean!) and a few dust specks being swept off the corner. It follows the macOS grid: an 824 px squircle on a
-1024 px canvas.
+Dusty peeks up from the bottom edge of a purple squircle, with a sun-yellow sparkle (clean!) and a few dust specks.
+The art is Dusty's real front pose (`assets/brand/dusty-front.png`, cut from the character sheet), so the icon and
+the app always match. It follows the macOS grid: an 824 px squircle on a 1024 px canvas.
 
-Regenerate `app/assets/Dusty.icns` after editing the SVG:
+| Purple (default) | Mint | Cream |
+|---|---|---|
+| <img src="assets/brand/dusty-icon.png" width="96"> | <img src="assets/brand/dusty-icon-mint.png" width="96"> | <img src="assets/brand/dusty-icon-cream.png" width="96"> |
 
-```bash
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --default-background-color=00000000 \
-  --window-size=1024,1024 --screenshot=/tmp/icon.png assets/brand/dusty-icon.svg
-mkdir -p /tmp/Dusty.iconset
-for s in 16 32 128 256 512; do
-  sips -z $s $s /tmp/icon.png --out /tmp/Dusty.iconset/icon_${s}x${s}.png
-  sips -z $((s*2)) $((s*2)) /tmp/icon.png --out /tmp/Dusty.iconset/icon_${s}x${s}@2x.png
-done
-iconutil -c icns /tmp/Dusty.iconset -o app/assets/Dusty.icns
-```
+People can switch colors in the app (**Dusty → App Icon**). This changes the Dock icon while Dusty runs and is saved
+in user defaults. The Finder icon stays purple, because changing a signed bundle's icon would break its signature.
+
+`assets/brand/dusty-icon.svg` is the master. After editing it, run `scripts/make-icons.sh` to re-render every color,
+the 512 px PNGs embedded in the app, and `app/assets/Dusty.icns`.
 
 ## Motion
 
