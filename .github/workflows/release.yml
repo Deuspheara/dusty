@@ -1,6 +1,11 @@
 name: Release
 
-# Push a tag like v0.2.0 (scripts/release.sh does the bump, commit and tag for you).
+# Push a tag like v0.2.0 or v0.2.0-beta.1 (scripts/release.sh bumps, commits and tags for you).
+# A tag with a "-" (v0.2.0-beta.1) becomes a GitHub pre-release and a beta-channel update.
+#
+#   build    (macOS)  universal app → sign → notarize → staple → DMG + update zip, Team ID checked
+#   publish  (Linux)  release notes → appcast entry → GitHub release → provenance attestations
+#   feed              rebuilds the website's appcast.xml so installed copies see the new version
 on:
   push:
     tags: ["v*"]
@@ -11,40 +16,71 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # every release must be signed by this team; anything else (a wrong certificate in the secrets) fails the build
+  EXPECTED_TEAM_ID: 8VU9W93ZU6
 
 jobs:
   build:
+    name: Build, sign and notarize
     runs-on: macos-15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      build: ${{ steps.version.outputs.build }}
     env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
-      # Optional signing + notarization. Leave these secrets unset for an unsigned build.
-      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}            # base64 of a Developer ID Application .p12
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}            # base64 of the Developer ID Application .p12
       MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
       DUSTY_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}  # "Developer ID Application: Name (TEAMID)"
-      NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}              # base64 of an App Store Connect API key (.p8)
+      NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}              # base64 of the App Store Connect API key (.p8)
       NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
       NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}  # EdDSA key that signs updates (generate_keys -x)
+      DUSTY_BUILD_NUMBER: ${{ github.run_number }}             # CFBundleVersion: what Sparkle compares
     steps:
-      - uses: actions/checkout@v7
+      - name: Check the release secrets are all there
+        run: |
+          missing=""
+          for v in MACOS_CERT_P12 MACOS_CERT_PASSWORD DUSTY_SIGN_IDENTITY NOTARY_KEY_P8 NOTARY_KEY_ID NOTARY_ISSUER_ID SPARKLE_PRIVATE_KEY; do
+            [ -n "$(printenv "$v")" ] || missing="$missing $v"
+          done
+          [ -z "$missing" ] || { echo "::error::missing release secrets:$missing"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.TAG }}
+          persist-credentials: false
 
       - name: Check the tag matches the app version
+        id: version
         run: |
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "::error::bad tag $TAG"; exit 1; }
           v="$(sed -n 's/^version = "\(.*\)"/\1/p' app/Cargo.toml | head -1)"
           test "v$v" = "$TAG" || { echo "::error::tag $TAG but app/Cargo.toml says $v"; exit 1; }
+          case "$v" in *-*) pre=true ;; *) pre=false ;; esac
+          { echo "version=$v"; echo "prerelease=$pre"; echo "build=$DUSTY_BUILD_NUMBER"; } >> "$GITHUB_OUTPUT"
           echo "VERSION=$v" >> "$GITHUB_ENV"
 
-      - uses: dtolnay/rust-toolchain@stable
+      # no build cache here on purpose: a release is built from scratch, so a poisoned cache can't reach it
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: app
+
+      - name: Test
+        run: cd app && cargo test --release --locked
+
+      - name: Fetch Sparkle (checksum-pinned)
+        run: scripts/fetch-sparkle.sh
 
       - name: Import signing certificate
-        if: env.MACOS_CERT_P12 != ''
         run: |
           KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
           KC_PASS="$(openssl rand -hex 16)"
@@ -53,41 +89,141 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
           security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASS" "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASS" "$KEYCHAIN" >/dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm "$RUNNER_TEMP/cert.p12"
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
 
       - name: Build universal Dusty.app
         env:
-          DUSTY_BUILD_NUMBER: ${{ github.run_number }}
+          DUSTY_REQUIRE_SPARKLE: "1"
         run: app/bundle.sh universal
 
-      - name: Package DMG
+      - name: Check who signed it
         run: |
-          mkdir -p dmg && cp -R app/target/Dusty.app dmg/ && ln -s /Applications dmg/Applications
+          APP=app/target/Dusty.app
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          for f in "$APP" "$APP/Contents/Frameworks/Sparkle.framework"; do
+            team="$(codesign -dv "$f" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+            test "$team" = "$EXPECTED_TEAM_ID" || { echo "::error::$f is signed by team '$team', expected $EXPECTED_TEAM_ID"; exit 1; }
+          done
+          codesign -dv "$APP" 2>&1 | grep -q 'flags=.*runtime' || { echo "::error::hardened runtime is off"; exit 1; }
+
+      - name: Notarize and staple the app
+        run: |
+          ditto -c -k --keepParent app/target/Dusty.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait --timeout 30m
+          xcrun stapler staple app/target/Dusty.app
+          spctl --assess --type execute --verbose=2 app/target/Dusty.app
+
+      - name: Package, notarize and staple the DMG
+        run: |
+          mkdir -p dmg && ditto app/target/Dusty.app dmg/Dusty.app && ln -s /Applications dmg/Applications
           hdiutil create -volname "Dusty" -srcfolder dmg -ov -format UDZO "Dusty-$VERSION.dmg"
-          if [ -n "$DUSTY_SIGN_IDENTITY" ]; then codesign --sign "$DUSTY_SIGN_IDENTITY" --timestamp "Dusty-$VERSION.dmg"; fi
-
-      - name: Notarize and staple
-        if: env.NOTARY_KEY_P8 != '' && env.DUSTY_SIGN_IDENTITY != ''
-        run: |
-          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          codesign --sign "$DUSTY_SIGN_IDENTITY" --timestamp "Dusty-$VERSION.dmg"
           xcrun notarytool submit "Dusty-$VERSION.dmg" --key "$RUNNER_TEMP/notary.p8" \
-            --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+            --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait --timeout 30m
           xcrun stapler staple "Dusty-$VERSION.dmg"
-          rm "$RUNNER_TEMP/notary.p8"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "Dusty-$VERSION.dmg"
 
-      - name: Zip the app and write checksums
+      - name: Update zip, its Sparkle signature and checksums
         run: |
           ditto -c -k --keepParent app/target/Dusty.app "Dusty-$VERSION.zip"
+          # prints: sparkle:edSignature="…" length="…"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | app/vendor/sparkle-bin/sign_update --ed-key-file - "Dusty-$VERSION.zip" > sparkle-signature.txt
+          grep -q 'sparkle:edSignature="' sparkle-signature.txt
           shasum -a 256 "Dusty-$VERSION.dmg" "Dusty-$VERSION.zip" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v3
+      - name: Clean up signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/cert.p12"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: |
+            Dusty-${{ steps.version.outputs.version }}.dmg
+            Dusty-${{ steps.version.outputs.version }}.zip
+            SHA256SUMS.txt
+            sparkle-signature.txt
+          retention-days: 3
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release
+      id-token: write      # sign the provenance attestation
+      attestations: write
+      actions: write       # kick the website workflow to refresh the appcast
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      PRERELEASE: ${{ needs.build.outputs.prerelease }}
+      BUILD: ${{ needs.build.outputs.build }}
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+
+      - name: Release notes
+        run: |
+          gh api "repos/$REPO/releases/generate-notes" -f tag_name="$TAG" --jq .body > notes.md
+          if [ "$PRERELEASE" = "true" ]; then
+            printf '> **Beta.** Installed betas update themselves to newer betas and to the next stable version.\n\n' | cat - notes.md > n && mv n notes.md
+          fi
+          cat notes.md
+
+      - name: Appcast entry
+        run: |
+          SIG="$(cat sparkle-signature.txt)"
+          CHANNEL=""
+          [ "$PRERELEASE" = "true" ] && CHANNEL="<sparkle:channel>beta</sparkle:channel>"
+          NOTES="$(sed 's/]]>/]]\&gt;/g' notes.md)"
+          cat > appcast-item.xml <<XML
+          <item>
+            <title>Dusty $VERSION</title>
+            <pubDate>$(date -u '+%a, %d %b %Y %H:%M:%S +0000')</pubDate>
+            <link>https://github.com/$REPO/releases/tag/$TAG</link>
+            <sparkle:version>$BUILD</sparkle:version>
+            <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+            $CHANNEL
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[$NOTES]]></description>
+            <enclosure url="https://github.com/$REPO/releases/download/$TAG/Dusty-$VERSION.zip" type="application/octet-stream" $SIG/>
+          </item>
+          XML
+          # must parse inside a feed with the sparkle namespace
+          printf '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel>%s</channel></rss>' "$(cat appcast-item.xml)" \
+            | python3 -c 'import sys, xml.dom.minidom; xml.dom.minidom.parseString(sys.stdin.read())'
+          cat appcast-item.xml
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            Dusty-${{ env.VERSION }}.dmg
+            Dusty-${{ env.VERSION }}.zip
+
+      - uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ env.TAG }}
           name: Dusty ${{ env.VERSION }}
-          generate_release_notes: true
+          body_path: notes.md
+          prerelease: ${{ env.PRERELEASE == 'true' }}
+          make_latest: ${{ env.PRERELEASE == 'true' && 'false' || 'true' }}
           files: |
             Dusty-${{ env.VERSION }}.dmg
             Dusty-${{ env.VERSION }}.zip
             SHA256SUMS.txt
+            appcast-item.xml
+
+      - name: Refresh the update feed on the website
+        run: gh workflow run pages.yml --repo "$REPO" --ref main

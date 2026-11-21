@@ -1,5 +1,8 @@
 name: Website
 
+# The site in site/, plus the Sparkle update feed (appcast.xml) assembled from the releases.
+# Release.yml runs this (on main) after each release so installed copies see the new version.
+# After editing or deleting a release by hand, run it again from the Actions tab.
 on:
   push:
     branches: [main]
@@ -8,24 +11,51 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: site
+          persist-credentials: false
+
+      - name: Assemble the site and the update feed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p _site && cp -R site/. _site/
+          # newest first; each release carries its signed <item> (written by release.yml)
+          {
+            echo '<?xml version="1.0" encoding="utf-8"?>'
+            echo '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">'
+            echo '<channel>'
+            echo '<title>Dusty</title>'
+            echo "<link>https://github.com/$REPO</link>"
+            echo '<description>Dusty updates</description>'
+            gh release list --repo "$REPO" --limit 30 --exclude-drafts --json tagName --jq '.[].tagName' | while read -r tag; do
+              gh release download "$tag" --repo "$REPO" --pattern appcast-item.xml --output - 2>/dev/null || true
+            done
+            echo '</channel>'
+            echo '</rss>'
+          } > _site/appcast.xml
+          python3 -c 'import xml.dom.minidom as m; d = m.parse("_site/appcast.xml"); print(len(d.getElementsByTagName("item")), "update(s) in the feed")'
+
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
