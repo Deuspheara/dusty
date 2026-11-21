@@ -1,0 +1,18 @@
+# gitleaks config: default rules plus a guard against committing signing material.
+title = "dusty gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "apple-signing-material"
+description = "Apple signing certificates, API keys or provisioning profiles"
+path = '''\.(p12|p8|cer|mobileprovision|provisionprofile)$'''
+
+[allowlist]
+description = "binary art and lockfiles"
+paths = [
+  '''\.(png|webp|icns|jpg|jpeg|gif)$''',
+  '''package-lock\.json$''',
+  '''Cargo\.lock$''',
+]

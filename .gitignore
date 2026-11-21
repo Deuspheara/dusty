@@ -1,0 +1,21 @@
+# build output
+node_modules/
+dist/
+app/target/
+*.dmg
+
+# local / editor
+.DS_Store
+.claude/
+.idea/
+.vscode/
+*.log
+.env
+.env.*
+
+# signing material never belongs in git
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.provisionprofile

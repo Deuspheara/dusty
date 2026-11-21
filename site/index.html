@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dusty: a tidy Mac, one crumb at a time</title>
+<meta name="description" content="Dusty is a small macOS app that finds build folders, dev caches and app junk, and clears them without touching anything you'd have to download again.">
+<meta property="og:title" content="Dusty: a tidy Mac, one crumb at a time">
+<meta property="og:description" content="A playful macOS disk cleaner. Build folders, dev caches, app junk. Never your code.">
+<meta property="og:image" content="https://deuspheara.github.io/dusty/img/og.png">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="img/icon.png">
+<style>
+  :root {
+    --bg: #17112B;
+    --bg-2: #1F1738;
+    --surface: #251C44;
+    --line: #3A2F63;
+    --ink: #F7F2FF;
+    --muted: #B6ACD9;
+    --cream: #FFFBF5;
+    --grape: #8B6EFF;
+    --grape-edge: #5B3FD9;
+    --mint: #22C993;
+    --coral: #FF5A6E;
+    --sun: #FFC83D;
+    --sky: #3DB8FF;
+    --blue: #5B8DEF;
+    --teal: #2EC4B6;
+    --round: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --text: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.6 var(--text); -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  }
+  a { color: inherit; }
+  img { display: block; max-width: 100%; height: auto; }
+  .wrap { width: min(1120px, 100% - 40px); margin-inline: auto; }
+  :focus-visible { outline: 3px solid var(--sun); outline-offset: 3px; border-radius: 8px; }
+
+  /* drifting dust, behind everything */
+  .dust { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+  .dust i {
+    position: absolute; border-radius: 50%; background: var(--muted); opacity: .18;
+    animation: drift linear infinite;
+  }
+  @keyframes drift { from { transform: translate(0, 0); } to { transform: translate(-60px, -110vh); } }
+  main, header, footer { position: relative; z-index: 1; }
+
+  /* nav */
+  header .wrap { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font: 900 22px var(--round); text-decoration: none; }
+  .brand img { width: 40px; height: 40px; }
+  nav { display: flex; gap: 26px; font-weight: 600; color: var(--muted); }
+  nav a { text-decoration: none; }
+  nav a:hover { color: var(--ink); }
+
+  /* chunky buttons, same shape as in the app */
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px; padding: 15px 26px; border-radius: 16px;
+    font: 800 16px var(--round); letter-spacing: .02em; text-decoration: none; text-transform: uppercase;
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .btn-primary { background: var(--grape); color: #fff; box-shadow: 0 5px 0 var(--grape-edge); }
+  .btn-ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 2px var(--line), 0 5px 0 var(--line); }
+  .btn:hover { transform: translateY(-2px); }
+  .btn-primary:hover { box-shadow: 0 7px 0 var(--grape-edge); }
+  .btn:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--grape-edge); }
+
+  /* hero */
+  .hero { display: grid; grid-template-columns: 1.1fr .9fr; gap: 56px; align-items: center; padding: 20px 0 30px; }
+  .eyebrow { display: inline-flex; gap: 8px; align-items: center; color: var(--mint); font-weight: 700; font-size: 15px; }
+  h1 { font: 900 clamp(44px, 6vw, 76px)/1.02 var(--round); letter-spacing: -.025em; margin: 14px 0 20px; }
+  h1 .crumb { color: var(--sun); }
+  .lede { font-size: 20px; color: var(--muted); max-width: 34ch; margin: 0 0 32px; }
+  .cta { display: flex; gap: 16px; flex-wrap: wrap; }
+  .fine { margin-top: 18px; font-size: 14px; color: var(--muted); }
+  .fine code { font: 13px var(--mono); color: var(--ink); }
+
+  .hero > *, .rules > *, .cli > *, .steps > *, .menu > * { min-width: 0; }
+  .stage { position: relative; justify-self: center; }
+  .window {
+    width: 300px; border-radius: 22px; overflow: hidden; background: var(--cream);
+    box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 40px 80px -20px rgba(0,0,0,.6);
+    transform: rotate(2deg);
+  }
+  .peek {
+    position: absolute; width: 170px; left: -120px; bottom: 40px; transform: rotate(-8deg);
+    filter: drop-shadow(0 14px 18px rgba(0,0,0,.35));
+    transition: transform .3s cubic-bezier(.3,1.6,.5,1);
+  }
+  .stage:hover .peek { transform: rotate(-4deg) translateY(-14px); }
+  .bubble {
+    position: absolute; left: -150px; top: 70px; background: var(--cream); color: #2B2340;
+    padding: 12px 18px; border-radius: 18px; font: 800 15px var(--round);
+    box-shadow: 0 4px 0 #E8E4F3;
+  }
+  .bubble::after {
+    content: ""; position: absolute; left: 50px; bottom: -9px; width: 18px; height: 18px;
+    background: var(--cream); transform: rotate(45deg); border-radius: 3px;
+  }
+
+  /* signature: the disk bar */
+  .disk { margin: 70px 0 20px; padding: 30px; border-radius: 26px; background: var(--surface); border: 1px solid var(--line); }
+  .disk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; flex-wrap: wrap; }
+  .disk-head h2 { font: 900 26px var(--round); margin: 0; }
+  .disk-head p { margin: 0; color: var(--muted); font-size: 15px; }
+  .bar { display: flex; height: 44px; border-radius: 14px; overflow: hidden; margin: 22px 0 18px; background: #120D22; }
+  .bar span {
+    position: relative; display: flex; align-items: center; justify-content: center; font: 800 13px var(--round);
+    color: #1A1430; white-space: nowrap; overflow: hidden; transform-origin: left;
+  }
+  .bar .used { background: #4A3F72; color: var(--muted); }
+  .bar .optin { background: repeating-linear-gradient(135deg, var(--grape) 0 8px, #6E55E0 8px 16px); color: #fff; }
+  .js .bar span:not(.used) { animation: eat 1s ease-out both; animation-play-state: paused; }
+  .js .disk.go .bar span:not(.used) { animation-play-state: running; }
+  @keyframes eat { from { transform: scaleX(0); } }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px 22px; list-style: none; padding: 0; margin: 0; font-size: 14px; color: var(--muted); }
+  .legend li { display: flex; align-items: center; gap: 8px; }
+  .legend b { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+
+  /* sections */
+  section { padding: 90px 0 0; }
+  .sec-head { max-width: 640px; margin-bottom: 40px; }
+  .sec-head h2 { font: 900 clamp(32px, 4vw, 46px)/1.08 var(--round); margin: 0 0 12px; letter-spacing: -.02em; }
+  .sec-head p { margin: 0; color: var(--muted); font-size: 18px; }
+
+  .menu { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .dish {
+    --c: var(--grape);
+    padding: 24px; border-radius: 22px; background: var(--surface); border: 1px solid var(--line);
+    border-top: 6px solid var(--c);
+  }
+  .dish .glyph {
+    width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; font-size: 24px;
+    background: color-mix(in srgb, var(--c) 22%, transparent);
+  }
+  .dish h3 { font: 900 21px var(--round); margin: 16px 0 6px; display: flex; align-items: center; gap: 10px; }
+  .tag { font: 800 11px var(--round); letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; background: color-mix(in srgb, var(--c) 25%, transparent); color: var(--c); }
+  .dish p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  .step figure { margin: 0; }
+  .step .shot { border-radius: 20px; overflow: hidden; background: var(--cream); box-shadow: 0 30px 60px -25px rgba(0,0,0,.7); }
+  .step figcaption { margin-top: 18px; }
+  .step .n { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 10px; background: var(--grape); font: 900 15px var(--round); margin-right: 10px; }
+  .step h3 { display: inline; font: 900 20px var(--round); }
+  .step p { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
+
+  .rules { display: grid; grid-template-columns: 300px 1fr; gap: 50px; align-items: start; }
+  .rules .happy { width: 260px; filter: drop-shadow(0 20px 24px rgba(0,0,0,.4)); position: sticky; top: 40px; }
+  .rules ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+  .rules li {
+    display: grid; grid-template-columns: 34px 1fr; gap: 14px; padding: 18px 20px; border-radius: 18px;
+    background: var(--bg-2); border: 1px solid var(--line);
+  }
+  .rules li svg { width: 34px; height: 34px; }
+  .rules strong { display: block; font: 800 17px var(--round); }
+  .rules span { color: var(--muted); font-size: 15px; }
+  .rules code, .cli code { font: 14px var(--mono); }
+
+  .cli { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+  pre {
+    margin: 0; padding: 24px; border-radius: 20px; background: #0F0A1D; border: 1px solid var(--line);
+    font: 14px/1.8 var(--mono); color: #E6DEFF; overflow-x: auto;
+  }
+  pre .c { color: #7D73A6; }
+  pre .p { color: var(--mint); }
+
+  .last { text-align: center; padding: 110px 0 70px; }
+  .last img { width: 110px; margin: 0 auto 18px; }
+  .last h2 { font: 900 clamp(34px, 4.5vw, 52px)/1.05 var(--round); margin: 0 0 14px; }
+  .last p { color: var(--muted); margin: 0 0 30px; }
+  footer { border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+
+  @media (max-width: 900px) {
+    .hero, .rules, .cli { grid-template-columns: 1fr; }
+    .menu, .steps { grid-template-columns: 1fr 1fr; }
+    .stage { margin-top: 20px; }
+    .peek { left: -40px; width: 120px; }
+    .bubble { left: -30px; top: -30px; }
+    .rules .happy { position: static; width: 180px; }
+    nav { display: none; }
+  }
+  @media (max-width: 600px) {
+    .menu, .steps { grid-template-columns: 1fr; }
+    .window { width: 260px; }
+    h1 { font-size: 40px; }
+    .disk { padding: 22px; }
+    .bar span { font-size: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dust i, .js .bar span { animation: none !important; }
+    .btn, .peek { transition: none; }
+  }
+</style>
+</head>
+<body>
+<script>document.documentElement.classList.add('js')</script>
+<div class="dust" aria-hidden="true"></div>
+
+<header>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="img/icon.svg" alt="">Dusty</a>
+    <nav aria-label="Sections">
+      <a href="#menu">What it cleans</a>
+      <a href="#how">How it works</a>
+      <a href="#rules">Safety</a>
+      <a href="https://github.com/Deuspheara/dusty">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <span class="eyebrow">● Free and open source, for macOS 13+</span>
+        <h1>Your Mac is full of <span class="crumb">crumbs</span>. Dusty eats them.</h1>
+        <p class="lede">A small cat that sniffs out build folders, dev caches and app junk, then clears them without touching anything you'd have to download again.</p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/Deuspheara/dusty/releases/latest">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>
+            Download for Mac
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/Deuspheara/dusty">View source</a>
+        </div>
+        <p class="fine">Apple silicon and Intel. Prefer a terminal? There's a <code>dusty</code> CLI too.</p>
+      </div>
+      <div class="stage">
+        <div class="window"><img src="img/screen-home.png" width="550" height="1000" alt="Dusty's home screen: a disk checkup card showing free space and a Start checkup button"></div>
+        <div class="bubble">Psst… I smell build folders.</div>
+        <img class="peek" src="img/dusty.png" alt="">
+      </div>
+    </div>
+
+    <div class="disk" id="disk">
+      <div class="disk-head">
+        <h2>Where 77.9 GB of crumbs were hiding</h2>
+        <p>One real developer Mac, first checkup. 18.2 GB could go right away, no re-downloads needed.</p>
+      </div>
+      <div class="bar" role="img" aria-label="Leftovers found: build folders 9.5 GB, dev caches 8.1 GB, app caches 0.7 GB, re-downloadable 59.7 GB">
+        <span style="flex: 9.5; background: var(--coral); animation-delay: .05s">9.5 GB</span>
+        <span style="flex: 8.1; background: var(--sun); animation-delay: .15s">8.1 GB</span>
+        <span style="flex: 1.2; background: var(--sky); animation-delay: .25s"></span>
+        <span class="optin" style="flex: 59.7; animation-delay: .35s">59.7 GB, only if you say so</span>
+      </div>
+      <ul class="legend">
+        <li><b style="background: var(--coral)"></b>Build folders</li>
+        <li><b style="background: var(--sun)"></b>Dev tool caches</li>
+        <li><b style="background: var(--sky)"></b>App caches</li>
+        <li><b style="background: var(--grape)"></b>Re-downloadable (off by default)</li>
+      </ul>
+    </div>
+
+    <section id="menu">
+      <div class="sec-head">
+        <h2>What's on Dusty's menu</h2>
+        <p>Six kinds of leftovers, each in its own color. The safe ones are picked for you. Anything that costs a re-download waits for your say-so.</p>
+      </div>
+      <div class="menu">
+        <article class="dish" style="--c: var(--coral)">
+          <div class="glyph" aria-hidden="true">🧱</div>
+          <h3>Build folders</h3>
+          <p>Flutter <code>build/</code>, Gradle <code>.gradle/</code>, Rust <code>target/</code>, SwiftPM <code>.build/</code>, <code>.next</code>, <code>dist</code>, <code>__pycache__</code>, CMake, Zig.</p>
+        </article>
+        <article class="dish" style="--c: var(--sun)">
+          <div class="glyph" aria-hidden="true">🗄️</div>
+          <h3>Dev caches</h3>
+          <p>Xcode DerivedData and DeviceSupport, unavailable simulators, Gradle transforms, emulator snapshots, old IDE versions, Homebrew.</p>
+        </article>
+        <article class="dish" style="--c: var(--sky)">
+          <div class="glyph" aria-hidden="true">🌐</div>
+          <h3>App caches</h3>
+          <p>Browser, chat and media caches. An app that's open is left alone until you quit it.</p>
+        </article>
+        <article class="dish" style="--c: var(--teal)">
+          <div class="glyph" aria-hidden="true">🧾</div>
+          <h3>Junk &amp; logs</h3>
+          <p>Old logs and crash reports, unfinished downloads, stale Mail attachment copies.</p>
+        </article>
+        <article class="dish" style="--c: var(--blue)">
+          <div class="glyph" aria-hidden="true">🐳</div>
+          <h3>Docker</h3>
+          <p>Build cache and stopped containers. Images and volumes are yours to opt into.</p>
+        </article>
+        <article class="dish" style="--c: var(--grape)">
+          <div class="glyph" aria-hidden="true">📦</div>
+          <h3>Re-downloadable <span class="tag">opt-in</span></h3>
+          <p><code>node_modules</code>, <code>.venv</code>, Pods, package caches, old toolchains and simulator runtimes. Off until you tick them.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="how">
+      <div class="sec-head">
+        <h2>Sniff, pick, munch</h2>
+        <p>One checkup, one tap. Want control? Choose items one by one, or flip on a practice run that deletes nothing.</p>
+      </div>
+      <div class="steps">
+        <div class="step"><figure>
+          <div class="shot"><img src="img/screen-checkup.png" width="550" height="1000" alt="Checkup in progress: a running total of leftovers found and the latest finds"></div>
+          <figcaption><span class="n">1</span><h3>Checkup</h3><p>Dusty walks your projects and caches and reports what it finds as it goes.</p></figcaption>
+        </figure></div>
+        <div class="step"><figure>
+          <div class="shot"><img src="img/screen-results.png" width="550" height="1000" alt="Results: leftovers grouped by kind, with the safe picks already selected"></div>
+          <figcaption><span class="n">2</span><h3>Results</h3><p>The safe picks are already selected. Review them, or open Choose items.</p></figcaption>
+        </figure></div>
+        <div class="step"><figure>
+          <div class="shot"><img src="img/screen-done.png" width="550" height="1000" alt="Done: how much space was freed"></div>
+          <figcaption><span class="n">3</span><h3>Clean</h3><p>Dusty munches each item and tells you how much room you got back.</p></figcaption>
+        </figure></div>
+      </div>
+    </section>
+
+    <section id="rules">
+      <div class="rules">
+        <img class="happy" src="img/dusty-happy.png" alt="Dusty, smiling">
+        <div>
+          <div class="sec-head">
+            <h2>Dusty has house rules</h2>
+            <p>A cleaner you can't trust is worse than a full disk. These checks run before anything is deleted.</p>
+          </div>
+          <ul>
+            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#22C993" opacity=".2"/><path d="M10 17.5l4.5 4.5L24 12.5" stroke="#22C993" stroke-width="3.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <div><strong>Never your code</strong><span>A project folder is only cleared when its parent has a matching marker (<code>pubspec.yaml</code>, <code>Cargo.toml</code>…) and git says the folder is ignored.</span></div></li>
+            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#3DB8FF" opacity=".2"/><path d="M9 17l8-7 8 7v8H9z" stroke="#3DB8FF" stroke-width="3" fill="none" stroke-linejoin="round"/></svg>
+              <div><strong>Home only</strong><span>Paths must sit inside your home folder. No symlink tricks, no mounted volumes, never Documents, Mail, Photos, iCloud Drive, Keychains or <code>.ssh</code>.</span></div></li>
+            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#FFC83D" opacity=".2"/><circle cx="17" cy="17" r="7" stroke="#FFC83D" stroke-width="3" fill="none"/><path d="M17 13.5V17l2.5 2" stroke="#FFC83D" stroke-width="2.6" stroke-linecap="round"/></svg>
+              <div><strong>Busy apps are skipped</strong><span>If Slack, a browser or Figma is open, its cache stays put and Dusty tells you why.</span></div></li>
+            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#FF5A6E" opacity=".2"/><path d="M11 11l12 12M23 11L11 23" stroke="#FF5A6E" stroke-width="3" stroke-linecap="round"/></svg>
+              <div><strong>Some caches aren't caches</strong><span>Offline music, password managers, cloud sync, VPNs and virtual machines keep real data there, so Dusty doesn't touch them.</span></div></li>
+            <li><svg viewBox="0 0 34 34" aria-hidden="true"><rect width="34" height="34" rx="10" fill="#8B6EFF" opacity=".25"/><path d="M11 17h12M17 11v12" stroke="#B9A8FF" stroke-width="3" stroke-linecap="round" transform="rotate(45 17 17)"/></svg>
+              <div><strong>Nothing goes until you say so</strong><span>Every clean ends at a confirm screen. Practice run shows the whole thing with zero deletes.</span></div></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="cli">
+      <div class="cli">
+        <div class="sec-head" style="margin: 0">
+          <h2>Rather type than tap?</h2>
+          <p>The same engine and the same rules, as a CLI. Run it on a schedule and your disk stays tidy.</p>
+        </div>
+<pre><span class="c"># from a clone of the repo</span>
+<span class="p">$</span> npm install &amp;&amp; npm run build &amp;&amp; npm link
+<span class="p">$</span> dusty scan              <span class="c"># report only</span>
+<span class="p">$</span> dusty                   <span class="c"># pick, confirm, clean</span>
+<span class="p">$</span> dusty --dry-run --yes   <span class="c"># what a clean would remove</span>
+<span class="p">$</span> dusty -k 3              <span class="c"># spare projects touched in 3 days</span></pre>
+      </div>
+    </section>
+
+    <div class="last">
+      <img src="img/icon.svg" alt="">
+      <h2>Give Dusty a snack.</h2>
+      <p>Free, open source, and it purrs on Apple silicon.</p>
+      <a class="btn btn-primary" href="https://github.com/Deuspheara/dusty/releases/latest">Download for Mac</a>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Dusty is MIT licensed. Made with a lint roller and Rust.</span>
+    <a href="https://github.com/Deuspheara/dusty">github.com/Deuspheara/dusty</a>
+  </div>
+</footer>
+
+<script>
+  // dust specks drifting up the page
+  (function () {
+    var host = document.querySelector('.dust');
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    for (var i = 0; i < 26; i++) {
+      var d = document.createElement('i'), s = 2 + Math.random() * 5;
+      d.style.cssText = 'width:' + s + 'px;height:' + s + 'px;left:' + (Math.random() * 100) + '%;top:' + (20 + Math.random() * 100) +
+        '%;animation-duration:' + (18 + Math.random() * 30) + 's;animation-delay:-' + (Math.random() * 40) + 's';
+      host.appendChild(d);
+    }
+  })();
+  // the disk bar fills in when it scrolls into view
+  (function () {
+    var disk = document.getElementById('disk');
+    if (!('IntersectionObserver' in window)) { disk.classList.add('go'); return; }
+    new IntersectionObserver(function (e, o) {
+      if (e[0].isIntersecting) { disk.classList.add('go'); o.disconnect(); }
+    }, { threshold: .4 }).observe(disk);
+  })();
+</script>
+</body>
+</html>

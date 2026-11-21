@@ -1,0 +1,31 @@
+[package]
+name = "dusty"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Deuspheara/dusty"
+publish = false
+description = "Dusty: a playful macOS disk cleaner that never throws away what you would have to re-download."
+
+[dependencies]
+# runtime_shaders: Metal shaders are compiled at launch, so building needs no Metal toolchain
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde_json = "1"
+libc = "0.2"
+raw-window-handle = "0.6"
+anyhow = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"
+metal = "0.29"
+
+[profile.dev]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

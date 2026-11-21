@@ -1,0 +1,93 @@
+name: Release
+
+# Push a tag like v0.2.0 (scripts/release.sh does the bump, commit and tag for you).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      # Optional signing + notarization. Leave these secrets unset for an unsigned build.
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}            # base64 of a Developer ID Application .p12
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      DUSTY_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}  # "Developer ID Application: Name (TEAMID)"
+      NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}              # base64 of an App Store Connect API key (.p8)
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Check the tag matches the app version
+        run: |
+          v="$(sed -n 's/^version = "\(.*\)"/\1/p' app/Cargo.toml | head -1)"
+          test "v$v" = "$TAG" || { echo "::error::tag $TAG but app/Cargo.toml says $v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+
+      - name: Import signing certificate
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KC_PASS="$(openssl rand -hex 16)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KC_PASS" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Build universal Dusty.app
+        env:
+          DUSTY_BUILD_NUMBER: ${{ github.run_number }}
+        run: app/bundle.sh universal
+
+      - name: Package DMG
+        run: |
+          mkdir -p dmg && cp -R app/target/Dusty.app dmg/ && ln -s /Applications dmg/Applications
+          hdiutil create -volname "Dusty" -srcfolder dmg -ov -format UDZO "Dusty-$VERSION.dmg"
+          if [ -n "$DUSTY_SIGN_IDENTITY" ]; then codesign --sign "$DUSTY_SIGN_IDENTITY" --timestamp "Dusty-$VERSION.dmg"; fi
+
+      - name: Notarize and staple
+        if: env.NOTARY_KEY_P8 != '' && env.DUSTY_SIGN_IDENTITY != ''
+        run: |
+          echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          xcrun notarytool submit "Dusty-$VERSION.dmg" --key "$RUNNER_TEMP/notary.p8" \
+            --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" --wait
+          xcrun stapler staple "Dusty-$VERSION.dmg"
+          rm "$RUNNER_TEMP/notary.p8"
+
+      - name: Zip the app and write checksums
+        run: |
+          ditto -c -k --keepParent app/target/Dusty.app "Dusty-$VERSION.zip"
+          shasum -a 256 "Dusty-$VERSION.dmg" "Dusty-$VERSION.zip" > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Dusty ${{ env.VERSION }}
+          generate_release_notes: true
+          files: |
+            Dusty-${{ env.VERSION }}.dmg
+            Dusty-${{ env.VERSION }}.zip
+            SHA256SUMS.txt
