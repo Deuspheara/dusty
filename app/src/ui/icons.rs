@@ -41,7 +41,10 @@ icon_set! {
     Lock => "lock", Practice => "practice", Sparkle => "sparkle", Paw => "paw", Gift => "gift", Party => "party",
     Broom => "broom", Schedule => "schedule", Uninstall => "uninstall", BigFiles => "big-files", Usage => "usage",
     History => "history", Telescope => "telescope", Wrench => "wrench", Oops => "oops", Relief => "relief",
-    Dizzy => "dizzy",
+    Dizzy => "dizzy", Menu => "menu",
+    // the agents in Look further (their ACP registry icons, in their colors)
+    LogoClaude => "logo-claude", LogoCodex => "logo-codex", LogoGemini => "logo-gemini", LogoCopilot => "logo-copilot",
+    LogoCursor => "logo-cursor", LogoOpencode => "logo-opencode",
 }
 
 /// The icons' native size (their viewBox and width/height).

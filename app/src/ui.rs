@@ -72,13 +72,14 @@ enum Screen {
     AppDetail,
     Large,
     Usage,
+    Explore,
     History,
     Settings,
 }
 
 impl Screen {
     fn is_tool(self) -> bool {
-        matches!(self, Screen::Apps | Screen::AppDetail | Screen::Large | Screen::Usage | Screen::History | Screen::Settings)
+        matches!(self, Screen::Apps | Screen::AppDetail | Screen::Large | Screen::Usage | Screen::Explore | Screen::History | Screen::Settings)
     }
 }
 
@@ -88,6 +89,7 @@ enum ConfirmKind {
     Clean,
     Uninstall,
     TrashFiles,
+    TrashSuggestions,
 }
 
 struct ScanJob {
@@ -220,6 +222,8 @@ pub struct DustyApp {
     scan: Option<ScanJob>,
     clean: Option<CleanJob>,
     confirm: bool,
+    /// Narrow windows: the menu of places is open (since when, for its entrance).
+    menu: Option<Instant>,
     confirm_kind: ConfirmKind,
     /// when the confirm sheet started closing: it plays its exit before it is removed
     confirm_closing: Option<Instant>,
@@ -326,6 +330,7 @@ impl DustyApp {
             scan: None,
             clean: None,
             confirm: false,
+            menu: None,
             confirm_kind: ConfirmKind::Clean,
             confirm_closing: None,
             group_anim: HashMap::new(),
@@ -415,7 +420,7 @@ impl DustyApp {
     fn col_max(&self, screen: Screen) -> f32 {
         match (self.is_wide(), screen) {
             (true, Screen::Scanning | Screen::Cleaning) => 720.,
-            (true, Screen::Home | Screen::Results | Screen::Pick | Screen::Large) => 1100.,
+            (true, Screen::Home | Screen::Results | Screen::Pick | Screen::Large | Screen::Explore) => 1100.,
             (true, _) => 900.,
             _ => MAX_W,
         }
@@ -902,6 +907,10 @@ impl DustyApp {
             self.close_confirm(cx);
             return;
         }
+        if self.menu.take().is_some() {
+            cx.notify();
+            return;
+        }
         if self.screen.is_tool() {
             self.tool_back(cx);
             return;
@@ -1046,6 +1055,7 @@ impl DustyApp {
             ConfirmKind::Clean => self.start_clean(cx),
             ConfirmKind::Uninstall => self.start_uninstall(cx),
             ConfirmKind::TrashFiles => self.start_trash_files(cx),
+            ConfirmKind::TrashSuggestions => self.start_trash_suggestions(cx),
         }
     }
 
@@ -1451,6 +1461,7 @@ impl Render for DustyApp {
                     }
                 })),
             )
+            .when(self.menu.is_some() && self.screen == Screen::Home && !self.has_sidebar(shown), |d| d.child(self.nav_menu(cx)))
             .when(self.confirm, |d| d.child(self.confirm_sheet(cx)))
             .when(self.upd_visible && !self.confirm, |d| d.child(self.update_sheet(cx)))
             .when_some(self.toast.clone(), |d, (msg, t0)| {

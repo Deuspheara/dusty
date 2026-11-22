@@ -69,20 +69,13 @@ impl DustyApp {
 
     pub(super) fn sidebar(&self, scr: Screen, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal();
-        let items: [(&'static str, Screen, Ico, Tone, &'static str); 6] = [
-            ("nav-home", Screen::Home, Ico::Broom, p.mint, "Checkup"),
-            ("nav-apps", Screen::Apps, Ico::Uninstall, p.sky, "Uninstall apps"),
-            ("nav-large", Screen::Large, Ico::BigFiles, p.sun, "Big & old files"),
-            ("nav-usage", Screen::Usage, Ico::Usage, p.grape, "Space map"),
-            ("nav-history", Screen::History, Ico::History, p.teal, "Clean history"),
-            ("nav-settings", Screen::Settings, Ico::Settings, p.blue, "Settings"),
-        ];
+        let items = std::iter::once(("nav-home", Screen::Home, Ico::Broom, p.mint, "Checkup")).chain(Self::places());
         let at = |s: Screen| match scr {
             Screen::Results | Screen::Pick | Screen::Done => s == Screen::Home,
             Screen::AppDetail => s == Screen::Apps,
             x => x == s,
         };
-        div().w(px(SIDE_NAV)).h_full().flex_none().flex().flex_col().gap(px(sp::XS)).pl(px(sp::L)).pr(px(sp::S)).pt(px(sp::S)).children(items.into_iter().map(|(id, target, ico, t, label)| {
+        div().w(px(SIDE_NAV)).h_full().flex_none().flex().flex_col().gap(px(sp::XS)).pl(px(sp::L)).pr(px(sp::S)).pt(px(sp::S)).children(items.map(|(id, target, ico, t, label)| {
             let on = at(target);
             div()
                 .id(id)
@@ -124,7 +117,7 @@ impl DustyApp {
             Screen::Results | Screen::Pick | Screen::Done => "",
             Screen::Cleaning => "Cleaning",
             // tool pages carry their own heading
-            Screen::Apps | Screen::AppDetail | Screen::Large | Screen::Usage | Screen::History | Screen::Settings => "",
+            Screen::Apps | Screen::AppDetail | Screen::Large | Screen::Usage | Screen::Explore | Screen::History | Screen::Settings => "",
         };
         div()
             .id("top-band")
@@ -150,8 +143,9 @@ impl DustyApp {
                 d.child(pill("back", None, "Done").on_click(cx.listener(|this, _, _, cx| this.back_to_results(cx))))
             })
             .when(scr == Screen::Results, |d| d.child(pill("rescan", None, "Rescan").on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)))))
-            .when(scr == Screen::Home && self.intro.is_none() && !self.has_sidebar(scr), |d| d.child(pill("settings", Some(Ico::Settings), "Settings").on_click(cx.listener(|this, _, _, cx| this.open_tool(Screen::Settings, cx)))))
-            .when(scr.is_tool() && (scr == Screen::AppDetail || !self.has_sidebar(scr)), |d| {
+            .when(scr == Screen::Home && self.intro.is_none() && !self.has_sidebar(scr), |d| d.child(pill("menu", Some(Ico::Menu), "Menu ▾").on_click(cx.listener(|this, _, _, cx| this.toggle_menu(cx)))))
+            // while an agent is being asked, Stop is the only way out (one button, not two)
+            .when(scr.is_tool() && (scr == Screen::AppDetail || !self.has_sidebar(scr)) && !(scr == Screen::Explore && self.explore_running()), |d| {
                 let (ico, label) = if scr == Screen::AppDetail { (Some(Ico::Back), "Apps") } else { (None, "Done") };
                 d.child(pill("tool-back", ico, label).on_click(cx.listener(|this, _, _, cx| this.tool_back(cx))))
             })
@@ -205,7 +199,7 @@ impl DustyApp {
             .child(div().flex_1().min_h(px(sp::M)))
             .child(self.enter(button("start", "Start checkup", Btn::Primary(pal().grape), true).on_click(cx.listener(|this, _, _, cx| this.start_scan(cx))), 0.3))
             .when(!compact, |d| d.child(self.enter(label_small("Nothing is deleted until you say so."), 0.34).mt(px(sp::XS))))
-            .child(self.enter(self.tool_row(cx), 0.38).mt(px(sp::M)).mb(px(sp::XL)))
+            .child(div().h(px(sp::XL)))
             .into_any_element()
     }
 
@@ -447,6 +441,7 @@ impl DustyApp {
                 }
                 div().opacity(1. - g_fade).max_h(px(260. * g_left)).overflow_hidden().child(card_el)
             }))
+            .child(pop_in_if(fresh, self.explore_card(cx), ElementId::NamedInteger("explore-card".into(), self.results_gen), motion::STAGGER * (groups.len() as u64 + 1)))
             .child(div().h(px(sp::XL)));
 
         let clean_btn = button("clean-safe", if safe > 0 { format!("Clean {}", format_bytes(safe)) } else { "Nothing safe to clean".into() }, Btn::Primary(pal().mint), safe > 0).on_click(cx.listener(|this, _, _, cx| {
