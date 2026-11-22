@@ -70,3 +70,19 @@ pub fn large_files(files: &[LargeFile]) -> Value {
             .collect(),
     )
 }
+
+pub fn explore(r: &dusty_ai::ExploreReport, agent: &dusty_ai::Agent) -> Value {
+    json!({
+        "agent": agent.id,
+        "account": r.account,
+        "tokens": r.tokens,
+        "own_looks": r.own_looks,
+        "suggestions": serde_json::to_value(&r.suggestions).unwrap_or_default(),
+        "looked": r.looked,
+        "unchanged": r.unchanged,
+        "refused": r.refused,
+        "note": r.note,
+        "asked_ai": r.asked,
+        "error": r.error.as_ref().map(|e| e.message(agent)),
+    })
+}

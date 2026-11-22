@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/dusty-core", "crates/dusty-cli"]
+members = ["crates/dusty-core", "crates/dusty-ai", "crates/dusty-cli"]
 
 [workspace.package]
 version = "0.1.0-beta.2"
@@ -28,6 +28,7 @@ path = "src/main.rs"
 
 [dependencies]
 dusty-core = { path = "crates/dusty-core" }
+dusty-ai = { path = "crates/dusty-ai" }
 # gpui-pre: weekly crates.io snapshots of Zed's GPUI (official `gpui` stopped at 0.2.2)
 gpui = { package = "gpui-pre", version = "0.3.13", default-features = false, features = ["font-kit"] }
 # runtime_shaders: Metal shaders are compiled at launch, so building needs no Metal toolchain

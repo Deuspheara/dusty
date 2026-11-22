@@ -2,6 +2,7 @@
 //! Status and errors go to stderr, so stdout stays clean for `--json` and pipes.
 
 use console::{style, Term};
+use dusty_core::explore::{Risk, Suggestion};
 use dusty_core::history::{HistoryEntry, PutBackReport};
 use dusty_core::large::LargeFile;
 use dusty_core::{format_bytes, tildify, CleanPlan, CleanReport, Group, Removal, Target};
@@ -62,6 +63,72 @@ pub fn target_choice(t: &Target) -> String {
 /// One line in the `dusty large` picker.
 pub fn large_choice(f: &LargeFile) -> String {
     format!("{:>8}  {}  {}", format_bytes(f.bytes), tildify(&f.path), style(format!("{} days since last use", f.days_unused())).dim())
+}
+
+pub fn suggestion_choice(s: &Suggestion) -> String {
+    format!("{:>8}  {}  {}", format_bytes(s.bytes), s.what, style(tildify(&s.path)).dim())
+}
+
+/// The agents, whether each can start here, and the account each one used last.
+pub fn agents(prefs: &dusty_ai::AgentPrefs) {
+    let picked = prefs.agent().id;
+    for a in dusty_ai::AGENTS {
+        let mark = if a.id == picked { style("●").green() } else { style("○").dim() };
+        let ready = match a.availability() {
+            dusty_ai::Availability::Ready => match prefs.accounts.get(a.id) {
+                Some(acc) => style(format!("ready · {acc}")).green().to_string(),
+                None => style(format!("ready · uses your {}", a.plan)).green().to_string(),
+            },
+            dusty_ai::Availability::Missing(why) => style(why).yellow().to_string(),
+        };
+        println!("{mark} {:<16} {:<10} {ready}", a.name, style(a.lock.chip().to_lowercase()).dim());
+    }
+    hint("Pick one with: dusty explore --agent <id>");
+}
+
+/// The helper's suggestions, each with its reasons.
+pub fn explore(r: &dusty_ai::ExploreReport, agent: &dusty_ai::Agent, verbose: bool) {
+    if let Some(e) = &r.error {
+        warn(&e.message(agent));
+    }
+    if r.asked {
+        let mut used = vec![format!("Asked {}", agent.name)];
+        used.extend(r.account.clone());
+        if r.tokens > 0 {
+            used.push(format!("{}k tokens", r.tokens.div_ceil(1000)));
+        }
+        if r.own_looks > 0 {
+            used.push(format!("looked at {} thing(s) itself, read-only", r.own_looks));
+        }
+        hint(&used.join(" · "));
+    }
+    if !r.asked && r.error.is_none() {
+        hint(&format!("Nothing new to ask about ({} folder(s) haven't grown since last time).", r.unchanged));
+    }
+    for s in &r.suggestions {
+        let risk = match s.risk {
+            Risk::Low => style("low risk").green(),
+            Risk::Medium => style("check first").yellow(),
+        };
+        let seen = if s.seen_before { style(" · seen before").dim().to_string() } else { String::new() };
+        println!("{}  {}  {risk}{seen}", style(format_bytes(s.bytes)).bold().green(), style(&s.what).bold());
+        println!("  {}", style(tildify(&s.path)).dim());
+        println!("  {}", s.why);
+        if !s.comes_back.is_empty() {
+            println!("  {} {}", style("Once it's gone:").dim(), s.comes_back);
+        }
+    }
+    if let Some(n) = &r.note {
+        hint(n);
+    }
+    if verbose {
+        for why in &r.refused {
+            println!("  {} {why}", style("turned down:").dim());
+        }
+    }
+    if r.suggestions.is_empty() && r.error.is_none() && r.asked {
+        done(&format!("{} looked at {} folder(s) and found nothing safe to toss.", agent.name, r.looked));
+    }
 }
 
 /// "Clean 4 item(s): 2.1 GB deleted, 300 MB to the Trash?"

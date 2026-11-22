@@ -1106,6 +1106,7 @@ name = "dusty"
 version = "0.1.0-beta.2"
 dependencies = [
  "anyhow",
+ "dusty-ai",
  "dusty-core",
  "futures",
  "gpui-pre",
@@ -1118,12 +1119,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "dusty-ai"
+version = "0.1.0-beta.2"
+dependencies = [
+ "dusty-core",
+ "libc",
+ "serde_json",
+]
+
+[[package]]
 name = "dusty-cli"
 version = "0.1.0-beta.2"
 dependencies = [
  "clap",
  "console",
  "dialoguer",
+ "dusty-ai",
  "dusty-core",
  "serde_json",
 ]

@@ -1,0 +1,16 @@
+[package]
+name = "dusty-ai"
+description = "Dusty's helper: asks an AI agent (Claude, over the Agent Client Protocol) to explain what a checkup doesn't know."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+dusty-core = { path = "../dusty-core" }
+serde_json = "1"
+libc = "0.2"
+
+[lints]
+workspace = true

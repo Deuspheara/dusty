@@ -38,7 +38,7 @@ pub struct Opts {
     /// Hide items smaller than N MB
     #[arg(short, long, value_name = "MB", default_value_t = 1, global = true)]
     pub min_size: u64,
-    /// Machine-readable output (scan, history, large)
+    /// Machine-readable output (scan, history, large, explore)
     #[arg(long, global = true)]
     pub json: bool,
     /// Move to the Trash instead of deleting (undo with `dusty put-back <id>`)
@@ -58,6 +58,18 @@ enum Cmd {
     PutBack { id: String },
     /// Review big and long-unused files (nothing preselected, picks go to the Trash)
     Large(LargeArgs),
+    /// Ask an AI agent about the big folders a checkup doesn't know (nothing preselected, picks go to the Trash)
+    Explore {
+        /// Which agent: claude, codex, gemini, copilot, cursor, opencode (default: the one picked last)
+        #[arg(long)]
+        agent: Option<String>,
+        /// List the agents, whether each is ready here, and the account each one used
+        #[arg(long)]
+        agents: bool,
+        /// Also say which suggestions the safety checks turned down, and why
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// The weekly safe clean
     Schedule {
         #[arg(value_enum, default_value_t = ScheduleState::Status)]
@@ -101,6 +113,7 @@ fn main() {
         Cmd::History => commands::history(&cli.opts),
         Cmd::PutBack { id } => commands::put_back(&id),
         Cmd::Large(args) => commands::large(&cli.opts, &args),
+        Cmd::Explore { agent, agents, verbose } => commands::explore(&cli.opts, agent.as_deref(), agents, verbose),
         Cmd::Schedule { state } => commands::schedule(state),
     };
     if let Err(e) = result {

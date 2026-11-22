@@ -3,6 +3,7 @@
 
 use crate::{json, render, LargeArgs, Opts, ScheduleState};
 use dialoguer::{Confirm, MultiSelect};
+use dusty_core::explore::{self, Suggestion};
 use dusty_core::history::{self, HistorySource};
 use dusty_core::large::{self, LargeFileOptions, LargeProgress};
 use dusty_core::schedule::{self, Schedule};
@@ -147,6 +148,54 @@ pub fn large(o: &Opts, a: &LargeArgs) -> Result {
         return Ok(());
     }
     render::trashed_files(&large::trash_files(&paths, o.dry_run));
+    Ok(())
+}
+
+pub fn explore(o: &Opts, pick_agent: Option<&str>, list: bool, verbose: bool) -> Result {
+    let mut prefs = dusty_ai::AgentPrefs::load();
+    if list {
+        render::agents(&prefs);
+        return Ok(());
+    }
+    if let Some(id) = pick_agent {
+        let ids: Vec<&str> = dusty_ai::AGENTS.iter().map(|a| a.id).collect();
+        dusty_ai::agent(id).ok_or_else(|| format!("No agent called `{id}` (try {})", ids.join(", ")))?;
+        prefs.selected = Some(id.to_string());
+        let _ = prefs.save();
+    }
+    let agent = prefs.agent();
+    let known = find_targets(o);
+    let progress = Mutex::new(dusty_ai::ExploreProgress::default());
+    let r = render::with_status(o.json, || progress.lock().unwrap().message.clone(), || dusty_ai::explore(agent, Some(known), &progress, &AtomicBool::new(false)));
+    if o.json {
+        println!("{}", json::pretty(&json::explore(&r, agent)));
+        return Ok(());
+    }
+    render::explore(&r, agent, verbose);
+    if r.suggestions.is_empty() {
+        return Ok(());
+    }
+    // review only: nothing is preselected, and picks go to the Trash
+    let labels: Vec<String> = r.suggestions.iter().map(render::suggestion_choice).collect();
+    let picked = match pick("Pick what to move to the Trash (enter with nothing picked to just look)", &labels, &vec![false; labels.len()])? {
+        Some(ix) if !ix.is_empty() => ix,
+        _ => {
+            render::done("Nothing moved.");
+            return Ok(());
+        }
+    };
+    let items: Vec<Suggestion> = picked.iter().map(|&i| r.suggestions[i].clone()).collect();
+    let total: u64 = items.iter().map(|s| s.bytes).sum();
+    if !o.dry_run && !confirm(&format!("Move {} item(s), {}, to the Trash?", items.len(), format_bytes(total)))? {
+        render::done("Cancelled.");
+        return Ok(());
+    }
+    let report = explore::trash(&items, o.dry_run);
+    render::trashed_files(&report);
+    if !o.dry_run && report.errors.is_empty() && confirm("Look for these in future checkups too (unticked)?")? {
+        let n = explore::remember(&items)?;
+        render::done(&format!("Added {n} to {}.", dusty_core::tildify(&dusty_core::user_catalog_file())));
+    }
     Ok(())
 }
 
