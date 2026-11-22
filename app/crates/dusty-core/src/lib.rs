@@ -6,7 +6,7 @@
 //!   ignore list and returns [`Target`]s;
 //! - [`clean_targets`] removes or trashes them under the safety rules (`clean`) and records each
 //!   clean in the history, where [`history::put_back`] can undo it;
-//! - [`large`], [`uninstall`] and [`usage`] are the tools; [`schedule`] is the weekly clean.
+//! - [`large`], [`uninstall`] and [`usage`] are the tools; [`explore`] is what a helper may see and suggest; [`schedule`] is the weekly clean.
 //!
 //! Safety rules:
 //! - project folders are only candidates when their parent has a matching marker file, and inside a
@@ -16,6 +16,7 @@
 
 mod catalog;
 mod clean;
+pub mod explore;
 pub mod history;
 mod ignore;
 pub mod ignore_edit;

@@ -56,6 +56,7 @@ impl DustyApp {
                         S::Scheduled => (Ico::Schedule, p.teal, "Weekly safe clean".to_string()),
                         S::Uninstall => (Ico::Uninstall, p.sky, format!("Uninstalled {}", e.items.first().map(|i| i.label.clone()).unwrap_or_else(|| "an app".into()))),
                         S::LargeFiles => (Ico::BigFiles, p.sun, format!("{} big file{}", e.items.len(), plural_s(e.items.len()))),
+                        S::Explore => (Ico::Telescope, p.grape, format!("{} found with Look further", n_items(e.items.len()))),
                         S::Cli => (Ico::Wrench, p.grape, "From the terminal".to_string()),
                     };
                     let (del, tr) = (e.bytes_deleted(), e.bytes_trashed());

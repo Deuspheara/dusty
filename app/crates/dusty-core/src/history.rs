@@ -32,6 +32,8 @@ pub enum HistorySource {
     Scheduled,
     Uninstall,
     LargeFiles,
+    /// Suggestions from Dusty's helper ("Look further").
+    Explore,
     Cli,
 }
 
@@ -42,6 +44,7 @@ impl HistorySource {
             HistorySource::Scheduled => "scheduled",
             HistorySource::Uninstall => "uninstall",
             HistorySource::LargeFiles => "large-files",
+            HistorySource::Explore => "explore",
             HistorySource::Cli => "cli",
         }
     }
@@ -50,6 +53,7 @@ impl HistorySource {
             "scheduled" => HistorySource::Scheduled,
             "uninstall" => HistorySource::Uninstall,
             "large-files" => HistorySource::LargeFiles,
+            "explore" => HistorySource::Explore,
             "cli" => HistorySource::Cli,
             _ => HistorySource::App,
         }

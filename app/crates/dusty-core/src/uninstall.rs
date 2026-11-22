@@ -132,11 +132,11 @@ pub fn is_apple_or_dusty(bundle_id: &str) -> bool {
 }
 
 /// Executable paths of running processes (`ps`), checked once per listing.
-fn running_paths() -> Vec<String> {
+pub(crate) fn running_paths() -> Vec<String> {
     run_s("/bin/ps", &["-axww", "-o", "comm="], 10).stdout.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
 }
 
-fn is_running(app: &Path, procs: &[String]) -> bool {
+pub(crate) fn is_running(app: &Path, procs: &[String]) -> bool {
     let prefix = format!("{}/", app.to_string_lossy());
     procs.iter().any(|p| p.starts_with(&prefix))
 }

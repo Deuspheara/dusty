@@ -11,8 +11,8 @@ use crate::providers::{provider, Provider};
 use serde::{Deserialize, Deserializer};
 use std::sync::OnceLock;
 
-const PROJECTS: &str = include_str!("../catalog/projects.toml");
-const SYSTEM: &str = include_str!("../catalog/system.toml");
+pub(crate) const PROJECTS: &str = include_str!("../catalog/projects.toml");
+pub(crate) const SYSTEM: &str = include_str!("../catalog/system.toml");
 
 pub(crate) struct Catalog {
     pub rules: Vec<Rule>,
