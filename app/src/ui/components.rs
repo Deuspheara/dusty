@@ -17,7 +17,7 @@ pub(super) const BTN_TRAVEL: f32 = 3.;
 pub(super) fn button(id: impl Into<ElementId>, label: impl Into<SharedString>, kind: Btn, enabled: bool) -> Stateful<Div> {
     let (bg, edge, fg, hover) = match kind {
         Btn::Primary(t) => (t.base, t.edge, 0xFFFFFF, t.hover),
-        Btn::Ghost => (pal().card, pal().line, pal().muted, pal().card_hover),
+        Btn::Ghost => (pal().card, pal().line, pal().ink, pal().card_hover),
     };
     let (bg, edge, fg) = if enabled { (bg, edge, fg) } else { (pal().line, pal().disabled_edge, pal().muted) };
     let ghost = matches!(kind, Btn::Ghost);
@@ -234,11 +234,11 @@ pub(super) fn progress_bar(t: f32, tone: Tone) -> impl IntoElement {
 
 /// Indeterminate bar for the checkup: a grape slug sliding across (a still, half-filled bar under Reduce motion).
 pub(super) fn busy_bar() -> impl IntoElement {
-    let track = div().w_full().h(px(10.)).rounded_full().bg(rgb(pal().line)).overflow_hidden().relative();
+    let track = div().w_full().h(px(12.)).rounded_full().bg(rgb(pal().line)).overflow_hidden().relative();
     if reduced() {
         return track.child(div().h_full().w(relative(0.5)).rounded_full().bg(rgb(pal().grape.base)).opacity(0.7));
     }
-    track.child(div().absolute().top_0().h_full().w(relative(0.3)).rounded_full().bg(rgb(pal().grape.base)).with_animation(
+    track.child(div().absolute().top_0().h_full().w(relative(0.3)).rounded_full().bg(linear_gradient(90., linear_color_stop(hsla_of(pal().grape.base, 0.), 0.), linear_color_stop(hsla_of(pal().grape.base, 1.), 0.5))).with_animation(
         "scanbar",
         Animation::new(Duration::from_millis(1300)).repeat().with_easing(ease_in_out),
         |el, t| el.left(relative(-0.3 + 1.3 * t)),
@@ -315,9 +315,29 @@ pub(super) fn hero_icon(i: Ico) -> Img {
     icon(i, 56.)
 }
 
-/// A sticky footer under a scrolling list: hairline on top, gutter on the sides.
+const FADE: f32 = 22.;
+
+/// A soft fade from transparent to `bg` (top-to-bottom when `down`), like iOS under bars.
+fn fade(bg: u32, down: bool) -> Div {
+    let (a, b) = (hsla_of(bg, 0.), hsla_of(bg, 1.));
+    let (from, to) = if down { (a, b) } else { (b, a) };
+    div().absolute().left_0().right_0().h(px(FADE)).bg(linear_gradient(180., linear_color_stop(from, 0.), linear_color_stop(to, 1.)))
+}
+
+fn hsla_of(c: u32, a: f32) -> Hsla {
+    let mut h: Hsla = rgb(c).into();
+    h.a = a;
+    h
+}
+
+/// A sticky footer under a scrolling list: the list fades out into it instead of ending on a line.
 pub(super) fn footer(bg: u32) -> Div {
-    div().flex_none().px(px(GUTTER)).pt(px(sp::M)).pb(px(sp::L)).flex().flex_col().gap(px(sp::XS)).border_t_2().border_color(rgb(pal().line)).bg(rgb(bg))
+    div().relative().flex_none().px(px(GUTTER)).pb(px(sp::L)).pt(px(sp::XS)).flex().flex_col().gap(px(sp::XS)).bg(rgb(bg)).child(fade(bg, true).top(px(-FADE)))
+}
+
+/// A scrolling region that fades in under whatever sits above it, instead of being cut off hard.
+pub(super) fn fade_top(list: impl IntoElement, bg: u32) -> Div {
+    div().relative().flex_1().min_h(px(0.)).flex().flex_col().child(list).child(fade(bg, false).top_0())
 }
 
 /// Checkbox that pops its tick in. `round` for the hint list.
@@ -333,7 +353,7 @@ pub(super) fn checkbox(key: SharedString, on: bool, t: Tone, side: f32, round: b
         .flex()
         .items_center()
         .justify_center()
-        .text_color(rgb(0xFFFFFF))
+        .text_color(rgb(if matches!(t.base, 0xFFC83D | 0x3DB8FF | 0x22C993 | 0x2EC4B6) { 0x2B2340 } else { 0xFFFFFF }))
         .font_weight(FontWeight::BLACK)
         .when(on, |d| {
             let full = side * 0.58;
@@ -342,6 +362,15 @@ pub(super) fn checkbox(key: SharedString, on: bool, t: Tone, side: f32, round: b
 }
 
 /// Pop an element in after `delay_ms`: fade and rise with a little overshoot.
+/// `pop_in` only when `on`: a screen you come back to keeps its content still instead of replaying its entrance.
+pub(super) fn pop_in_if<E: IntoElement + 'static>(on: bool, el: E, id: ElementId, delay_ms: u64) -> AnyElement {
+    if on {
+        pop_in(el, id, delay_ms).into_any_element()
+    } else {
+        div().child(el).into_any_element()
+    }
+}
+
 pub(super) fn pop_in<E: IntoElement + 'static>(el: E, id: ElementId, delay_ms: u64) -> impl IntoElement {
     let total = motion::ENTER + delay_ms;
     let start = delay_ms as f32 / total as f32;
@@ -422,7 +451,7 @@ pub(super) fn count_up(v: u64, t0: Instant, ms: u64) -> u64 {
 
 /// An on/off switch (Practice run, Settings toggles); `key` keeps its knob animation apart from others.
 pub(super) fn switch(key: &str, on: bool, t: Tone) -> Div {
-    div().w(px(44.)).h(px(26.)).flex_none().rounded_full().bg(rgb(if on { t.base } else { pal().line })).relative().child(
+    div().w(px(44.)).h(px(26.)).flex_none().rounded_full().bg(rgb(if on { t.base } else { pal().used })).relative().child(
         div()
             .absolute()
             .top(px(3.))

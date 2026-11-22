@@ -103,7 +103,8 @@ impl DustyApp {
         let depth = self.tools.usage_stack.len();
         let tones = [p.grape, p.sky, p.mint, p.sun, p.coral, p.teal, p.blue];
         // the map fills the room left between the header and the footer
-        let (w, h) = ((self.view.0 - 2. * GUTTER).max(200.), (self.view.1 - TOP - 296.).clamp(200., 900.));
+        let avail = self.view.0 - if self.has_sidebar(Screen::Usage) { SIDE_NAV } else { 0. };
+        let (w, h) = ((avail.min(self.col_max(Screen::Usage)) - 2. * GUTTER).max(200.), (self.view.1 - TOP - if self.is_wide() { 212. } else { 296. }).clamp(200., 900.));
         let rects = node.layout(Rect::new(0., 0., w, h));
         let hover = self.tools.usage_hover.and_then(|i| node.children.get(i).map(|c| (i, c)));
         let info: String = match &hover {

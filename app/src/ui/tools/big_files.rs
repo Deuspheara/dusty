@@ -210,7 +210,7 @@ impl DustyApp {
                                     .when(f.hard_linked, |d| d.child(small_chip("HARD LINK", p.sun)))
                                     .child(number(format_bytes(f.bytes), ts::BODY, if on { t.text } else { p.ink })),
                             )
-                            .child(div().flex().items_center().gap(px(sp::XS)).child(fill_line(label_small(folder))).child(label_small(format!("· {age}")).flex_none())),
+                            .child(div().flex().items_center().gap(px(sp::XS)).child(fill_line(label_small(folder))).child(label_small(age).flex_none())),
                     )
                     .when(hovered, |d| d.child(row_action(format!("freveal-{i}"), Ico::Reveal, "Show in Finder", p.grape).on_click(cx.listener(move |this, _, _, cx| this.reveal_path(rpath.clone(), cx)))));
                 div().mt(px(sp::S - 2. * RING_PAD)).py(px(RING_PAD)).child(row)
@@ -225,13 +225,37 @@ impl DustyApp {
         } else {
             format!("Move {n_sel} to Trash · {}", format_bytes(sel_bytes))
         };
+        // wide windows: a detail pane for the row under the pointer (or the focused one)
+        let hov = self.tools.hovered.clone();
+        let sel_i = files.iter().position(|f| hov.as_deref() == Some(format!("large-{}", f.path.to_string_lossy()).as_str())).or(self.tools.focus.filter(|i| *i < files.len())).or((!files.is_empty()).then_some(0));
+        let inspector = (self.is_wide() && !files.is_empty()).then(|| {
+            let body = match sel_i.map(|i| &files[i]) {
+                Some(f) => {
+                    let (e, t) = kind_look(f.kind);
+                    let rpath = f.path.clone();
+                    let tpath = f.path.clone();
+                    let on = self.tools.large_sel.contains(&f.path);
+                    div().flex().flex_col().gap(px(sp::M))
+                        .child(icon_tile(e, t, 56.))
+                        .child(div().text_size(px(ts::TITLE)).font_weight(FontWeight::BLACK).child(dusty_core::name_of(&f.path)))
+                        .child(number(format_bytes(f.bytes), ts::H2, p.ink))
+                        .child(label_small(f.path.parent().map(tildify).unwrap_or_default()))
+                        .child(label_small(format!("Opened {}", ago(secs_since(f.last_used)))))
+                        .child(button("insp-reveal", "Show in Finder", Btn::Ghost, true).on_click(cx.listener(move |this, _, _, cx| this.reveal_path(rpath.clone(), cx))))
+                        .child(button("insp-toggle", if on { "Keep it" } else { "Toss it" }, if on { Btn::Ghost } else { Btn::Primary(t) }, true).on_click(cx.listener(move |this, _, _, cx| this.toggle_large(&tpath, cx))))
+                }
+                None => div().flex().flex_col().items_center().justify_center().gap(px(sp::S)).h_full().child(hero_icon(Ico::Telescope)).child(subtitle("Point at a file").text_center()),
+            };
+            card().w(px(300.)).flex_none().mr(px(GUTTER)).mt(px(sp::S)).p(px(CARD_PAD)).child(body)
+        });
+        let list_pane = div().flex_1().min_w(px(0.)).min_h(px(0.)).flex().flex_col().child(fade_top(list, p.bg));
         div()
             .flex_1()
             .min_h(px(0.))
             .flex()
             .flex_col()
             .child(banner)
-            .child(list)
+            .child(div().flex_1().min_h(px(0.)).flex().child(list_pane).when_some(inspector, |d, i| d.child(i)))
             .child(footer(p.bg).child(button("large-go", go, Btn::Primary(p.coral), n_sel > 0 && !self.tools.large_busy).on_click(cx.listener(|this, _, _, cx| {
                 if !this.tools.large_sel.is_empty() && !this.tools.large_busy {
                     this.open_sheet(ConfirmKind::TrashFiles, cx)

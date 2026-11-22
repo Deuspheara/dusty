@@ -156,6 +156,10 @@ struct Particle {
 }
 
 /// Splash timeline (seconds): badge pops and dust sweeps in, then an iris opens on Dusty.
+/// Dusty beside the totals on Results and Choose items.
+const RESULTS_DUSTY: f32 = 100.;
+/// How long the old screen takes to fade out before the next one comes in (ms).
+const LEAVE_MS: u64 = 110;
 const SPLASH_HOLD: f32 = 0.32;
 const SPLASH_IRIS: f32 = 0.42;
 const SPLASH_END: f32 = SPLASH_HOLD + SPLASH_IRIS;
@@ -192,6 +196,21 @@ pub struct DustyApp {
     screen: Screen,
     nav: u64,
     nav_t: Instant,
+    /// when the current screen was entered (drives its count-ups and bar fills); unlike `nav_t` a sheet opening doesn't touch it
+    screen_t: Instant,
+    /// bumped once per scan: Results' entrance (cards, count-up) plays then, not on every return to it
+    results_gen: u64,
+    /// the screen being faded out just before the new one fades in, and since when
+    leaving: Option<(Screen, Instant)>,
+    /// the old screen's entry time (its count-ups stay finished while it fades out) and Dusty's size before / after the switch
+    leave_screen_t: Instant,
+    leave_sizes: Option<(f32, f32)>,
+    last_side: f32,
+    /// last seen layout (wide or not) and when it changed: the content crossfades over the switch
+    last_wide: bool,
+    layout_t: Instant,
+    /// when the confirm sheet opened
+    sheet_t: Instant,
     dusty: Entity<Dusty>,
     disk: Disk,
     targets: Vec<Target>,
@@ -288,6 +307,15 @@ impl DustyApp {
             screen: Screen::Home,
             nav: 0,
             nav_t: Instant::now(),
+            screen_t: Instant::now(),
+            results_gen: 0,
+            leaving: None,
+            leave_screen_t: Instant::now(),
+            leave_sizes: None,
+            last_side: 250.,
+            last_wide: false,
+            layout_t: Instant::now() - Duration::from_secs(5),
+            sheet_t: Instant::now(),
             dusty,
             disk,
             targets: vec![],
@@ -377,6 +405,25 @@ impl DustyApp {
         app
     }
 
+    /// Widest the content may grow: the split screens use the room, the rest stay a readable column.
+    fn col_max(&self, screen: Screen) -> f32 {
+        match (self.is_wide(), screen) {
+            (true, Screen::Scanning | Screen::Cleaning) => 720.,
+            (true, Screen::Home | Screen::Results | Screen::Pick | Screen::Large) => 1100.,
+            (true, _) => 900.,
+            _ => MAX_W,
+        }
+    }
+
+    /// When the screen on view was entered (the old screen's count-ups stay finished while it fades out).
+    pub(super) fn st(&self) -> Instant {
+        if self.leaving.is_some() {
+            self.leave_screen_t
+        } else {
+            self.screen_t
+        }
+    }
+
     /// Seconds since launch, while the intro plays.
     fn intro_t(&self) -> Option<f32> {
         // DUSTY_SPLASH_SLOW=10 plays the intro 10× slower (for checking it frame by frame)
@@ -404,9 +451,18 @@ impl DustyApp {
     }
 
     fn go(&mut self, s: Screen, cx: &mut Context<Self>) {
+        // the old screen fades out first (only the checkup flow's screens are safe to draw after their state moved on)
+        let calm = |x: Screen| x.is_tool() || matches!(x, Screen::Home | Screen::Scanning | Screen::Results | Screen::Pick | Screen::Done);
+        self.leaving = (self.screen != s && calm(self.screen) && !reduced() && self.intro.is_none()).then(|| (self.screen, Instant::now()));
+        if self.leaving.is_some() {
+            self.leave_screen_t = self.screen_t;
+            let new = self.dusty.read(cx).size();
+            self.leave_sizes = Some((self.last_side, new));
+        }
         self.screen = s;
         self.nav += 1;
         self.nav_t = Instant::now();
+        self.screen_t = self.nav_t;
         cx.notify();
     }
 
@@ -438,7 +494,7 @@ impl DustyApp {
             (Mood::Idle, "Light as a feather. But I smell crumbs…")
         };
         self.bubble = line.into();
-        let side = home_dusty_side(self.view.1);
+        let side = home_dusty_side(self.view.0, self.view.1);
         self.dusty(cx, |d| {
             d.set_size(side);
             d.st.set(mood, None);
@@ -480,7 +536,8 @@ impl DustyApp {
             return;
         }
         self.selected = targets.iter().filter(|t| t.default_on).map(|t| t.id.clone()).collect();
-        self.expanded = [Group::Build].into();
+        self.expanded = HashSet::new();
+        self.results_gen += 1;
         self.targets = targets;
         if let Some(problem) = dusty_core::user_catalog_problem() {
             self.toast(problem);
@@ -495,7 +552,7 @@ impl DustyApp {
         self.last_scan = dusty_core::summary::load_last_scan();
         self.bubble = if safe > 0 { format!("{} is safe to toss right now. No downloads needed!", format_bytes(safe)).into() } else { "Spotless already. I'm proud of you.".into() };
         self.dusty(cx, |d| {
-            d.set_size(118.);
+            d.set_size(RESULTS_DUSTY);
             d.st.set(Mood::Happy, Some(1.6));
         });
         self.burst_center(70, cx);
@@ -513,12 +570,14 @@ impl DustyApp {
     fn tick_scan(&mut self, dt: f32, cx: &mut Context<Self>) {
         let mut big_find = None;
         let mut line_change = None;
+        let mut fed: Vec<u32> = vec![];
         if let Some(job) = &mut self.scan {
             let p = job.progress.lock().unwrap();
             for t in p.found.iter().skip(job.seen) {
                 job.total += t.bytes;
                 if t.bytes > 200 * 1024 * 1024 {
                     job.chips.push((t.id.clone(), t.label.clone(), t.bytes, t.group));
+                    fed.push(tone(t.group).base);
                 }
                 if t.bytes > 4 * 1024 * 1024 * 1024 {
                     big_find = Some(t.label.clone());
@@ -527,8 +586,8 @@ impl DustyApp {
             job.seen = p.found.len();
             let msg = p.message.clone();
             drop(p);
-            if job.chips.len() > 6 {
-                let n = job.chips.len() - 6;
+            if job.chips.len() > 12 {
+                let n = job.chips.len() - 12;
                 job.chips.drain(..n);
             }
             job.shown += (job.total as f64 - job.shown) * (1. - (-dt as f64 * 6.).exp());
@@ -538,6 +597,9 @@ impl DustyApp {
                 const LINES: &[&str] = &["*sniff sniff* …build folders, I can tell.", "Checking with git so I never touch your real code.", "Ooh, Xcode left crumbs everywhere.", "Peeking at caches. Politely."];
                 line_change = Some(if job.line_i % 2 == 0 && !msg.is_empty() { msg } else { LINES[job.line_i % LINES.len()].to_string() });
             }
+        }
+        if !fed.is_empty() {
+            self.feed_cat(fed);
         }
         if let Some(l) = line_change {
             self.bubble = l.into();
@@ -775,7 +837,8 @@ impl DustyApp {
         let id = order[next].clone();
         if let Some(ix) = self.pick_rows().iter().position(|(_, t)| t.as_ref().is_some_and(|t| t.id == id)) {
             // the intro rows are children 0..3; the first item scrolls all the way back up (chips and title too)
-            self.pick_scroll.scroll_to_item(if next == 0 { 0 } else { 3 + ix });
+            let intro = if self.is_wide() { 0 } else { 3 };
+            self.pick_scroll.scroll_to_item(if next == 0 { 0 } else { intro + ix });
         }
         self.pick_focus = Some(id);
         self.pick_ring = true;
@@ -923,8 +986,10 @@ impl DustyApp {
     }
 
     fn back_to_results(&mut self, cx: &mut Context<Self>) {
-        self.dusty(cx, |d| d.set_size(118.));
+        self.dusty(cx, |d| d.set_size(RESULTS_DUSTY));
         self.go(Screen::Results, cx);
+        // the numbers and bars were already counted up: they stay put when you come back
+        self.screen_t = Instant::now() - Duration::from_secs(10);
     }
 
     fn open_pick(&mut self, cx: &mut Context<Self>) {
@@ -964,6 +1029,7 @@ impl DustyApp {
         self.confirm = true;
         self.confirm_closing = None;
         self.nav_t = Instant::now();
+        self.sheet_t = self.nav_t;
         cx.notify();
     }
 
@@ -1137,6 +1203,25 @@ impl DustyApp {
 
     // ── particles ──
 
+    /// Crumbs from a new find fly up into Dusty (the scan screen's centred cat).
+    fn feed_cat(&mut self, colors: Vec<u32>) {
+        if reduced() || self.screen != Screen::Scanning {
+            return;
+        }
+        let vw = self.view.0;
+        for c in colors.into_iter().take(3) {
+            for _ in 0..5 {
+                let x = vw / 2. + (self.rand() - 0.5) * 360.;
+                let y = 560. + self.rand() * 80.;
+                let (tx, ty) = (vw / 2. + (self.rand() - 0.5) * 40., 270.);
+                let (dx, dy) = (tx - x, ty - y);
+                let steps = 24.;
+                let (size, max) = (3. + self.rand() * 4., steps / 60.);
+                self.particles.push(Particle { x, y, vx: dx / steps, vy: dy / steps, g: 0., size, color: c, life: 0., max, round: true });
+            }
+        }
+    }
+
     fn crumbs(&mut self, at: Point<Pixels>, color: u32) {
         if reduced() {
             return;
@@ -1207,8 +1292,8 @@ impl Render for DustyApp {
         let vw = f32::from(window.viewport_size().width);
         self.view = (vw, f32::from(window.viewport_size().height));
         let tools_moving = self.tick_tools(dt, cx);
-        if self.screen == Screen::Home {
-            let side = home_dusty_side(self.view.1);
+        if self.screen == Screen::Home && self.leaving.is_none() {
+            let side = home_dusty_side(self.view.0, self.view.1);
             if (self.dusty.read(cx).size() - side).abs() > 0.5 {
                 self.dusty(cx, |d| d.set_size(side));
             }
@@ -1261,6 +1346,12 @@ impl Render for DustyApp {
                 self.intro = None; // home entrance finished too
             }
         }
+        let wide_now = self.is_wide();
+        if wide_now != self.last_wide {
+            self.last_wide = wide_now;
+            self.layout_t = Instant::now();
+        }
+        let layout_k = since(self.layout_t, 220);
         let animating = self.intro.is_some()
             || matches!(self.screen, Screen::Scanning | Screen::Cleaning)
             || !self.particles.is_empty()
@@ -1271,16 +1362,42 @@ impl Render for DustyApp {
             || groups_moving
             || upd_moving
             || tools_moving
+            || layout_k < 1.
+            || self.leaving.is_some()
+            // dev screenshot runs (unfocused window): keep frames coming while the first screen settles
+            || (std::env::var_os("DUSTY_NO_ACTIVATE").is_some() && self.nav_t.elapsed() < Duration::from_secs(6))
             || self.nav_t.elapsed() < Duration::from_millis(1400);
         if animating {
             window.request_animation_frame();
         }
 
-        let content = match self.screen {
-            Screen::Home => self.home(cx).into_any_element(),
+        let leaving = self.leaving.filter(|(_, t)| since(*t, LEAVE_MS) < 1.);
+        if leaving.is_none() {
+            self.leaving = None;
+        }
+        let shown = leaving.map(|(s, _)| s).unwrap_or(self.screen);
+        // Dusty keeps the old screen's size until it has faded; then it takes the new one
+        if leaving.is_some() {
+            if let Some((old, _)) = self.leave_sizes {
+                if (self.dusty.read(cx).size() - old).abs() > 0.5 {
+                    self.dusty(cx, |d| d.set_size(old));
+                }
+            }
+        } else if let Some((_, new)) = self.leave_sizes.take() {
+            self.dusty(cx, |d| d.set_size(new));
+        }
+        if leaving.is_none() {
+            self.last_side = self.dusty.read(cx).size();
+        }
+        // wide windows: one Dusty, one place, one size (the sidebar's)
+        if self.has_sidebar(shown) && shown != Screen::Home && (self.dusty.read(cx).size() - SIDE_CAT).abs() > 0.5 {
+            self.dusty(cx, |d| d.set_size(SIDE_CAT));
+        }
+        let content = match shown {
+            Screen::Home => self.home(cx),
             Screen::Scanning => self.scanning(cx).into_any_element(),
-            Screen::Results => self.results(cx).into_any_element(),
-            Screen::Pick => self.pick(cx).into_any_element(),
+            Screen::Results => self.results(cx),
+            Screen::Pick => self.pick(cx),
             Screen::Cleaning => self.cleaning(window, cx).into_any_element(),
             Screen::Done => self.done(cx).into_any_element(),
             _ => self.tool_screen(cx),
@@ -1305,15 +1422,25 @@ impl Render for DustyApp {
             .text_color(rgb(pal().ink))
             .flex()
             .flex_col()
-            .child(self.top_band(cx))
+            .child(self.top_band(shown, cx))
             .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .flex()
-                    .flex_col()
-                    .child(content)
-                    .with_animation(ElementId::NamedInteger("screen".into(), self.nav), anim(motion::ENTER).with_easing(ease_out_quint()), |el, t| el.opacity(t).mt(px(motion::RISE * (1. - t)))),
+                // wide windows: the content stays a readable column, centered, instead of stretching edge to edge
+                div().flex_1().min_h(px(0.)).flex().when(self.has_sidebar(shown), |d| d.child(self.sidebar(shown, cx))).child(div().flex_1().min_w(px(0.)).h_full().flex().when(!self.has_sidebar(shown), |d| d.justify_center()).child({
+                    let col = div()
+                        .w_full()
+                        .max_w(px(self.col_max(shown)))
+                        .min_h(px(0.))
+                        .flex()
+                        .flex_col()
+                        .child(div().size_full().flex().flex_col().opacity(0.7 + 0.3 * layout_k).child(content));
+                    match leaving {
+                        // out: the old screen fades away; in: the new one fades up from nothing and settles into place
+                        Some((_, t0)) => col.opacity(1. - 0.6 * since(t0, LEAVE_MS)).into_any_element(),
+                        None => col
+                            .with_animation(ElementId::NamedInteger("screen".into(), self.nav), anim(motion::ENTER).with_easing(ease_out_quint()), |el, t| el.opacity(0.4 + 0.6 * t).mt(px(10. * (1. - t))))
+                            .into_any_element(),
+                    }
+                })),
             )
             .when(self.confirm, |d| d.child(self.confirm_sheet(cx)))
             .when(self.upd_visible && !self.confirm, |d| d.child(self.update_sheet(cx)))
@@ -1355,7 +1482,7 @@ fn toast(msg: SharedString, ico: Option<Ico>, t0: Instant, ms: u64, action: Opti
     let a = k_in * (1. - k_out);
     div().absolute().top(px(TOP + sp::S)).left_0().right_0().px(px(GUTTER)).flex().justify_center().child(
         div()
-            .max_w(px(360.))
+            .max_w(px(MAX_W - 2. * GUTTER))
             .px(px(sp::L))
             .py(px(sp::M - sp::XXS))
             .rounded(px(radius::L))

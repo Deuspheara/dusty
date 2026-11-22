@@ -59,9 +59,10 @@ impl DustyApp {
                         S::Cli => (Ico::Wrench, p.grape, "From the terminal".to_string()),
                     };
                     let (del, tr) = (e.bytes_deleted(), e.bytes_trashed());
+                    let verb = if e.practice { "rehearsed" } else { "deleted" };
                     let split = match (del > 0, tr > 0) {
-                        (true, true) => format!("{} deleted · {} to the Trash", format_bytes(del), format_bytes(tr)),
-                        (true, false) => format!("{} deleted", format_bytes(del)),
+                        (true, true) => format!("{} {verb} · {} to the Trash", format_bytes(del), format_bytes(tr)),
+                        (true, false) => format!("{} {verb}", format_bytes(del)),
                         (false, true) => format!("{} to the Trash", format_bytes(tr)),
                         _ => n_items(e.items.len()),
                     };
@@ -72,15 +73,15 @@ impl DustyApp {
                             .child(icon_tile(glyph, t, 40.))
                             .child(
                                 div().flex_1().min_w(px(0.)).flex().flex_col().gap(px(sp::XXS))
-                                    .child(div().flex().items_center().gap(px(sp::S)).child(div().text_size(px(ts::LEAD)).font_weight(FontWeight::BLACK).one_line().child(title)).when(e.practice, |d| d.child(small_chip("PRACTICE", p.sky))))
-                                    .child(label_small(format!("{} · {}", local_date(e.ts), ago(now_secs().saturating_sub(e.ts)))).one_line())
+                                    .child(div().flex().flex_wrap().items_center().gap_x(px(sp::S)).child(div().text_size(px(ts::LEAD)).font_weight(FontWeight::BLACK).min_w(px(0.)).child(title)).when(e.practice, |d| d.child(small_chip("PRACTICE", p.sky))))
+                                    .child(label_small(if self.is_wide() { format!("{} · {}", local_date(e.ts), ago(now_secs().saturating_sub(e.ts))) } else { ago(now_secs().saturating_sub(e.ts)) }))
                                     .child(label_small(split).one_line())
                                     .when(!e.errors.is_empty(), |d| d.child(label_small(format!("{} left alone", e.errors.len())).text_color(rgb(p.warn)))),
                             )
                             .child(
                                 div().flex_none().flex().flex_col().items_end().gap(px(sp::XS))
-                                    .child(number(format_bytes(e.bytes), ts::LEAD, if e.practice { p.muted } else { t.text }))
-                                    .when(r.restorable > 0, |d| d.child(mini_button_icon(("hist-pb", i), Some(Ico::PutBack), if busy { "Putting back…".to_string() } else { format!("Put back {}", r.restorable) }, p.grape, !busy && self.tools.history_busy.is_none()).on_click(cx.listener(move |this, _, _, cx| this.put_back_entry(id.clone(), PutBackFor::History, cx))))),
+                                    .child(number(format_bytes(e.bytes), ts::LEAD, if e.practice { p.muted } else { p.ink }))
+                                    .when(r.restorable > 0, |d| d.child(mini_button_icon(("hist-pb", i), Some(Ico::PutBack), if busy { "Putting back…".to_string() } else { "Put back".to_string() }, p.grape, !busy && self.tools.history_busy.is_none()).on_click(cx.listener(move |this, _, _, cx| this.put_back_entry(id.clone(), PutBackFor::History, cx))))),
                             ),
                         ElementId::NamedInteger("hist".into(), nav * 1000 + i as u64),
                         (i.min(8) as u64) * motion::STAGGER / 2,
