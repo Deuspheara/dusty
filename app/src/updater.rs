@@ -86,6 +86,8 @@ fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
     let mut s = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let r = f(&mut s);
     s.generation += 1;
+    drop(s);
+    crate::wake::ping();
     r
 }
 

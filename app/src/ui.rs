@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use gpui::prelude::FluentBuilder;
+use futures::StreamExt;
 use gpui::*;
 
 use crate::dusty::{Dusty, Mood};
@@ -293,6 +294,7 @@ impl DustyApp {
         };
         set_appearance(pinned.unwrap_or(window.appearance()));
         refresh_reduced();
+        cx.set_reduce_motion(reduced()); // gpui's own animations follow it too
         let appearance = cx.observe_window_appearance(window, move |_, window, cx| {
             if pinned.is_none() && set_appearance(window.appearance()) {
                 cx.notify();
@@ -364,7 +366,7 @@ impl DustyApp {
             upd_version: String::new(),
             _appearance: appearance,
         };
-        app.focus.focus(window);
+        app.focus.focus(window, cx);
         app.enter_home(cx);
         app.open_from_env(cx);
         if let Some(v) = updater::just_updated() {
@@ -374,8 +376,12 @@ impl DustyApp {
         // pick up their news here (and re-measure the menu bar's free space now and then)
         let mut status_t = Instant::now();
         let handle = window.window_handle();
+        let mut wake = crate::wake::listen();
         cx.spawn(async move |this, cx| loop {
-            cx.background_executor().timer(Duration::from_millis(120)).await;
+            // sleep until a callback pings (or the menu bar title is due), instead of polling
+            let timer = cx.background_executor().timer(STATUS_REFRESH.saturating_sub(status_t.elapsed()));
+            let _ = futures::future::select(wake.next(), timer).await;
+            while wake.try_recv().is_ok() {} // one pass covers a burst of pings
             let g = updater::generation();
             if status_t.elapsed() > STATUS_REFRESH {
                 status_t = Instant::now();
@@ -383,7 +389,7 @@ impl DustyApp {
             }
             let req = platform::take_status_request();
             if matches!(req, platform::StatusRequest::Open | platform::StatusRequest::CheckUp) {
-                let _ = cx.update(|cx| cx.activate(true));
+                cx.update(|cx| cx.activate(true));
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
             }
             let alive = this.update(cx, |app, cx| {
@@ -482,6 +488,7 @@ impl DustyApp {
 
     fn enter_home(&mut self, cx: &mut Context<Self>) {
         refresh_reduced();
+        cx.set_reduce_motion(reduced()); // gpui's own animations follow it too
         self.disk = dusty_core::disk();
         self.last_scan = dusty_core::summary::load_last_scan();
         refresh_status_title();
@@ -1287,6 +1294,8 @@ impl Render for DustyApp {
             static ONCE: std::sync::Once = std::sync::Once::new();
             ONCE.call_once(|| eprintln!("first frame after {} ms", crate::START.get().map(|t| t.elapsed().as_millis()).unwrap_or(0)));
         }
+        #[cfg(feature = "profile")]
+        trace_window_frames(window);
         let dt = now.duration_since(self.last).as_secs_f32().min(0.1);
         self.last = now;
         let vw = f32::from(window.viewport_size().width);
@@ -1314,7 +1323,7 @@ impl Render for DustyApp {
         let removals_moving = self.tick_removals();
         // keys go to the window's root; take focus back if nothing else holds it
         if window.focused(cx).is_none() {
-            self.focus.focus(window);
+            self.focus.focus(window, cx);
         }
         // the sheet plays its exit, then goes
         if self.confirm_closing.is_some_and(|t| since(t, motion::EXIT) >= 1.) {
@@ -1490,7 +1499,7 @@ fn toast(msg: SharedString, ico: Option<Ico>, t0: Instant, ms: u64, action: Opti
             .text_color(rgb(pal().bg))
             .text_size(px(ts::BODY))
             .font_weight(FontWeight::BOLD)
-            .shadow(vec![BoxShadow { color: alpha(pal().scrim, 0.25), offset: point(px(0.), px(6.)), blur_radius: px(18.), spread_radius: px(0.) }])
+            .shadow(vec![BoxShadow { color: alpha(pal().scrim, 0.25), offset: point(px(0.), px(6.)), blur_radius: px(18.), spread_radius: px(0.), inset: false }])
             .opacity(a)
             .mt(px(-sp::M * (1. - back_out(k_in)) - sp::S * k_out))
             .flex()
@@ -1520,4 +1529,35 @@ mod tests {
         assert_eq!(ago(90 * 86_400), "3 months ago");
         assert_eq!(ago(800 * 86_400), "2 years ago");
     }
+}
+
+/// `--features profile` + `DUSTY_TRACE=1`: every 3 s, print what gpui-pre measured for whole-window draws.
+#[cfg(feature = "profile")]
+fn trace_window_frames(window: &mut Window) {
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<(Instant, u64)>> = Mutex::new(None);
+    if !crate::tracing() {
+        return;
+    }
+    let mut g = LAST.lock().unwrap();
+    let Some((t, drawn_before)) = *g else {
+        window.set_debug_frame_overlay_mode(gpui::DebugFrameOverlayMode::Minimal);
+        *g = Some((Instant::now(), 0));
+        return;
+    };
+    if t.elapsed() < Duration::from_secs(3) {
+        return;
+    }
+    let s = window.frame_duration_snapshot();
+    let d = &s.draw_duration_histogram;
+    let drawn = d.len();
+    let ms = |q: f64| d.value_at_quantile(q) as f64 / 1e6;
+    eprintln!(
+        "window: {:.0} draws/s, draw p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms",
+        (drawn - drawn_before) as f64 / t.elapsed().as_secs_f64(),
+        ms(0.5),
+        ms(0.95),
+        d.max() as f64 / 1e6
+    );
+    *g = Some((Instant::now(), drawn));
 }

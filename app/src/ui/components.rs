@@ -394,7 +394,7 @@ impl Render for Tip {
             .text_color(rgb(pal().bg))
             .text_size(px(ts::CAPTION))
             .font_weight(FontWeight::BOLD)
-            .shadow(vec![BoxShadow { color: alpha(pal().scrim, 0.2), offset: point(px(0.), px(3.)), blur_radius: px(10.), spread_radius: px(0.) }])
+            .shadow(vec![BoxShadow { color: alpha(pal().scrim, 0.2), offset: point(px(0.), px(3.)), blur_radius: px(10.), spread_radius: px(0.), inset: false }])
             .child(self.0.clone())
     }
 }
@@ -439,8 +439,8 @@ pub(super) const RING_PAD: f32 = 5.;
 pub(super) fn focus_ring(gap_color: u32) -> Vec<BoxShadow> {
     let g = pal().grape;
     vec![
-        BoxShadow { color: alpha(g.base, 0.9), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(4.5) },
-        BoxShadow { color: rgb(gap_color).into(), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(2.) },
+        BoxShadow { color: alpha(g.base, 0.9), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(4.5), inset: false },
+        BoxShadow { color: rgb(gap_color).into(), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(2.), inset: false },
     ]
 }
 
@@ -458,7 +458,7 @@ pub(super) fn switch(key: &str, on: bool, t: Tone) -> Div {
             .size(px(20.))
             .rounded_full()
             .bg(rgb(0xFFFFFF))
-            .shadow(vec![BoxShadow { color: alpha(0x000000, 0.12), offset: point(px(0.), px(2.)), blur_radius: px(0.), spread_radius: px(0.) }])
+            .shadow(vec![BoxShadow { color: alpha(0x000000, 0.12), offset: point(px(0.), px(2.)), blur_radius: px(0.), spread_radius: px(0.), inset: false }])
             .with_animation(ElementId::NamedInteger(format!("sw-{key}").into(), on as u64), anim(motion::BASE + 40), move |el, k| {
                 let k = back_out(k);
                 let (a, b) = if on { (3., 21.) } else { (21., 3.) };

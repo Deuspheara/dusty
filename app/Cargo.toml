@@ -28,12 +28,20 @@ path = "src/main.rs"
 
 [dependencies]
 dusty-core = { path = "crates/dusty-core" }
+# gpui-pre: weekly crates.io snapshots of Zed's GPUI (official `gpui` stopped at 0.2.2)
+gpui = { package = "gpui-pre", version = "0.3.13", default-features = false, features = ["font-kit"] }
 # runtime_shaders: Metal shaders are compiled at launch, so building needs no Metal toolchain
-gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+# font-kit: glyph rasterization on macOS (without it text lays out but draws nothing)
+gpui_platform = { package = "gpui-pre-platform", version = "0.3.13", default-features = false, features = ["font-kit", "runtime_shaders"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
 raw-window-handle = "0.6"
 anyhow = "1"
+futures = "0.3"
+
+[features]
+# `cargo run --features profile` + DUSTY_TRACE=1: gpui-pre's frame profiler (draw times, frame pacing, on-screen overlay)
+profile = ["gpui/profiler"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
