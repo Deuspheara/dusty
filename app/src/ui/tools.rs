@@ -261,10 +261,11 @@ impl DustyApp {
     /// The row of tools under "Start checkup" on the home screen.
     pub(super) fn tool_row(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = pal();
+        let wide = self.is_wide();
         let tiles: [(Screen, Ico, &'static str, &'static str, Tone, &'static str); 4] = [
             (Screen::Apps, Ico::Uninstall, "Uninstall", "apps", p.sky, "Apps leave crumbs. I find those too."),
             (Screen::Large, Ico::BigFiles, "Big & old", "files", p.sun, "Forgotten giants? You pick, I chomp."),
-            (Screen::Usage, Ico::Usage, "What's", "using space", p.grape, "A map of your disk, biggest first."),
+            (Screen::Usage, Ico::Usage, "Space", "map", p.grape, "A map of your disk, biggest first."),
             (Screen::History, Ico::History, "Clean", "history", p.teal, "What I ate, and what can go back."),
         ];
         div().w_full().flex().gap(px(sp::S)).children(tiles.into_iter().enumerate().map(|(i, (screen, e, l1, l2, t, tip))| {
@@ -304,11 +305,11 @@ impl DustyApp {
                     cx.notify();
                 }))
                 .on_click(cx.listener(move |this, _, _, cx| this.open_tool(screen, cx)))
-                .child(icon_tile(e, t, 30.).group_hover(SharedString::from(format!("tool-{i}")), |s| s.mt(px(-2.))))
+                .child(icon_tile(e, t, if wide { 40. } else { 30. }).group_hover(SharedString::from(format!("tool-{i}")), |s| s.mt(px(-2.))))
                 .child(
-                    div().w_full().px(px(sp::XS)).flex().flex_col().items_center().text_size(px(ts::CAPTION)).line_height(px(ts::CAPTION * 1.2)).font_weight(FontWeight::BLACK).text_color(rgb(p.ink))
+                    div().w_full().px(px(sp::XS)).flex().flex_col().items_center().text_size(px(if wide { ts::SMALL } else { ts::CAPTION })).line_height(px(if wide { ts::SMALL * 1.2 } else { ts::CAPTION * 1.2 })).font_weight(FontWeight::BLACK).text_color(rgb(p.ink))
                         .child(div().w_full().text_center().child(l1))
-                        .child(div().w_full().text_center().text_color(rgb(t.text)).child(l2)),
+                        .child(div().w_full().text_center().child(l2)),
                 )
         }))
     }
@@ -377,6 +378,12 @@ impl DustyApp {
             Ok("usage") => Screen::Usage,
             Ok("history") => Screen::History,
             Ok("settings") => Screen::Settings,
+            // dev: start the checkup straight away
+            Ok("scan") => {
+                self.intro = None;
+                self.start_scan(cx);
+                return;
+            }
             _ => return,
         };
         self.intro = None;
@@ -607,7 +614,7 @@ impl DustyApp {
 
     /// Dusty with the tool's title and his bubble as the subtitle.
     fn tool_header(&self, title: impl Into<SharedString>) -> Div {
-        div().flex().items_center().gap(px(sp::M)).child(div().flex_none().child(self.dusty.clone())).child(
+        div().flex().items_center().gap(px(sp::M)).when(self.cat_here(), |d| d.child(div().flex_none().child(self.dusty.clone()))).child(
             div().flex().flex_col().gap(px(sp::XS)).flex_1().min_w(px(0.))
                 .child(div().text_size(px(ts::H1)).line_height(px(ts::H1 * 1.15)).font(tabular(FontWeight::BLACK)).child(title.into()))
                 .child(subtitle(self.bubble.clone())),

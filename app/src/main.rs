@@ -181,11 +181,14 @@ fn main() {
         })
         .detach();
 
-        let bounds = Bounds::centered(None, size(px(440.), px(800.)), cx);
+        // 440×800 unless the screen is shorter (13" laptops): then it fits the visible area
+        let screen = cx.primary_display().map(|d| d.bounds().size).unwrap_or(size(px(1440.), px(900.)));
+        let h = px(800.).min(screen.height - px(120.)).max(px(600.));
+        let bounds = Bounds::centered(None, size(px(440.), h), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
-                window_min_size: Some(size(px(400.), px(660.))),
+                window_min_size: Some(size(px(400.), px(580.))),
                 titlebar: Some(TitlebarOptions { title: Some("Dusty".into()), appears_transparent: true, traffic_light_position: Some(point(px(18.), px(20.))) }),
                 app_id: Some("io.github.deuspheara.dusty".into()),
                 ..Default::default()
@@ -193,7 +196,10 @@ fn main() {
             |window, cx| cx.new(|cx| ui::DustyApp::new(window, cx)),
         )
         .expect("open window");
-        cx.activate(true);
+        // DUSTY_NO_ACTIVATE=1 (dev): open without taking focus, for screenshot runs
+        if std::env::var_os("DUSTY_NO_ACTIVATE").is_none() {
+            cx.activate(true);
+        }
     });
 }
 

@@ -7,7 +7,25 @@ pub(super) const ITEM_H: f32 = 40.;
 /// About how tall a Choose items row is (two lines), for closing its slot once it has faded out.
 pub(super) const PICK_ROW_H: f32 = 66.;
 
+/// Wide windows: a fixed left pane (summary and actions) beside a right pane that scrolls.
+pub(super) fn split(top: impl IntoElement, bottom: impl IntoElement, right: impl IntoElement) -> Div {
+    div()
+        .flex_1()
+        .min_h(px(0.))
+        .flex()
+        .gap(px(sp::XL))
+        .px(px(GUTTER))
+        .pt(px(sp::S))
+        .child(div().w(px(SIDE_W)).flex_none().flex().flex_col().gap(px(sp::XL)).pb(px(sp::XL)).child(top).child(bottom))
+        .child(div().flex_1().min_w(px(0.)).flex().flex_col().child(right))
+}
+
 impl DustyApp {
+    /// True when the window is wide enough for two panes.
+    pub(super) fn is_wide(&self) -> bool {
+        self.view.0 >= WIDE_W
+    }
+
     pub(super) fn set_hover(&mut self, id: &str, on: bool, cx: &mut Context<Self>) {
         let before = self.hovered_row.clone();
         if on {
@@ -35,19 +53,78 @@ impl DustyApp {
     }
 
     /// The window's top: content runs edge to edge under the transparent titlebar; this band drags the window.
-    pub(super) fn top_band(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let title = match self.screen {
+    /// Dusty where a screen wants him; in a wide window with a sidebar he lives there instead (one place, one size).
+    pub(super) fn cat_here(&self) -> bool {
+        !(self.has_sidebar(self.screen) && self.screen != Screen::Home)
+    }
+
+    pub(super) fn cat(&self) -> Div {
+        if self.has_sidebar(self.screen) && self.screen != Screen::Home { div() } else { div().child(self.dusty.clone()) }
+    }
+
+    /// Wide windows: a sidebar for the top-level places (Apple split view), so the tools stop being stranded columns.
+    pub(super) fn has_sidebar(&self, scr: Screen) -> bool {
+        self.is_wide() && self.intro.is_none() && !matches!(scr, Screen::Scanning | Screen::Cleaning)
+    }
+
+    pub(super) fn sidebar(&self, scr: Screen, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = pal();
+        let items: [(&'static str, Screen, Ico, Tone, &'static str); 6] = [
+            ("nav-home", Screen::Home, Ico::Broom, p.mint, "Checkup"),
+            ("nav-apps", Screen::Apps, Ico::Uninstall, p.sky, "Uninstall apps"),
+            ("nav-large", Screen::Large, Ico::BigFiles, p.sun, "Big & old files"),
+            ("nav-usage", Screen::Usage, Ico::Usage, p.grape, "Space map"),
+            ("nav-history", Screen::History, Ico::History, p.teal, "Clean history"),
+            ("nav-settings", Screen::Settings, Ico::Settings, p.blue, "Settings"),
+        ];
+        let at = |s: Screen| match scr {
+            Screen::Results | Screen::Pick | Screen::Done => s == Screen::Home,
+            Screen::AppDetail => s == Screen::Apps,
+            x => x == s,
+        };
+        div().w(px(SIDE_NAV)).h_full().flex_none().flex().flex_col().gap(px(sp::XS)).pl(px(sp::L)).pr(px(sp::S)).pt(px(sp::S)).children(items.into_iter().map(|(id, target, ico, t, label)| {
+            let on = at(target);
+            div()
+                .id(id)
+                .h(px(HIT + 8.))
+                .px(px(sp::S))
+                .flex()
+                .items_center()
+                .gap(px(sp::S))
+                .rounded(px(radius::M))
+                .bg(rgb(if on { p.grape.soft } else { p.bg }))
+                .text_size(px(ts::SMALL))
+                .font_weight(FontWeight::BLACK)
+                .text_color(rgb(if on { p.grape.text } else { p.ink }))
+                .cursor_pointer()
+                .when(!on, |d| d.hover(|s| s.bg(rgb(p.card))))
+                .active(|s| s.opacity(0.7))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if target == Screen::Home {
+                        if this.screen != Screen::Home {
+                            this.enter_home(cx);
+                        }
+                    } else if this.screen != target {
+                        this.open_tool(target, cx);
+                    }
+                }))
+                .child(icon_tile(ico, t, 24.))
+                .child(div().flex_1().min_w(px(0.)).one_line().child(label))
+        }))
+        .child(div().flex_1())
+        .when(scr != Screen::Home, |d| d.child(div().w_full().pb(px(sp::L)).flex().flex_col().items_center().child(div().w(px(SIDE_CAT)).h(px(SIDE_CAT)).flex_none().child(self.dusty.clone()))))
+    }
+
+    pub(super) fn top_band(&self, scr: Screen, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = match scr {
             Screen::Home => "",
             Screen::Scanning => "Checkup",
-            Screen::Results => "Results",
-            Screen::Pick => "Choose items",
+            // these two carry their own big heading
+            Screen::Results | Screen::Pick | Screen::Done => "",
             Screen::Cleaning => "Cleaning",
-            Screen::Done => "All done",
-            Screen::Apps | Screen::AppDetail => "Uninstall apps",
-            Screen::Large => "Big & old files",
-            Screen::Usage => "What's using space",
-            Screen::History => "History",
-            Screen::Settings => "Settings",
+            // tool pages carry their own heading
+            Screen::Apps | Screen::AppDetail | Screen::Large | Screen::Usage | Screen::History | Screen::Settings => "",
         };
         div()
             .id("top-band")
@@ -66,15 +143,19 @@ impl DustyApp {
                 }
             })
             .child(div().text_size(px(ts::BODY)).font_weight(FontWeight::BLACK).text_color(rgb(pal().muted)).child(title))
-            .when(self.screen == Screen::Pick, |d| {
+            // the pills sit at the content column's right edge (the window's edge when it is narrow)
+            .child(div().absolute().inset_0().flex().justify_center().when(self.has_sidebar(scr), |d| d.pl(px(SIDE_NAV)).justify_start()).child(
+                div().relative().w_full().max_w(px(self.col_max(scr))).h_full().when(self.has_sidebar(scr), |d| d.mr(px(0.)))
+            .when(scr == Screen::Pick, |d| {
                 d.child(pill("back", None, "Done").on_click(cx.listener(|this, _, _, cx| this.back_to_results(cx))))
             })
-            .when(self.screen == Screen::Results, |d| d.child(pill("rescan", None, "Rescan").on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)))))
-            .when(self.screen == Screen::Home && self.intro.is_none(), |d| d.child(pill("settings", Some(Ico::Settings), "Settings").on_click(cx.listener(|this, _, _, cx| this.open_tool(Screen::Settings, cx)))))
-            .when(self.screen.is_tool(), |d| {
-                let (ico, label) = if self.screen == Screen::AppDetail { (Some(Ico::Back), "Apps") } else { (None, "Done") };
+            .when(scr == Screen::Results, |d| d.child(pill("rescan", None, "Rescan").on_click(cx.listener(|this, _, _, cx| this.start_scan(cx)))))
+            .when(scr == Screen::Home && self.intro.is_none() && !self.has_sidebar(scr), |d| d.child(pill("settings", Some(Ico::Settings), "Settings").on_click(cx.listener(|this, _, _, cx| this.open_tool(Screen::Settings, cx)))))
+            .when(scr.is_tool() && (scr == Screen::AppDetail || !self.has_sidebar(scr)), |d| {
+                let (ico, label) = if scr == Screen::AppDetail { (Some(Ico::Back), "Apps") } else { (None, "Done") };
                 d.child(pill("tool-back", ico, label).on_click(cx.listener(|this, _, _, cx| this.tool_back(cx))))
             })
+            ))
             .when_some(self.update_pill_label(), |d, label| {
                 d.child(
                     update_pill(label)
@@ -91,19 +172,23 @@ impl DustyApp {
         div().flex_1().min_h(px(0.)).flex().flex_col().px(px(GUTTER))
     }
 
-    pub(super) fn home(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn home(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let d = self.disk;
-        let bar_t = self.enter_k(0.3).min(since(self.nav_t, motion::FILL));
+        let bar_t = self.enter_k(0.3).min(since(self.st(), motion::FILL));
+        let compact = self.view.1 < COMPACT_H;
+        if self.is_wide() {
+            return self.home_wide(cx).into_any_element();
+        }
         self.page()
             .items_center()
-            .child(div().h(px(sp::L)))
+            .child(div().h(px(if compact { sp::XS } else { sp::L })))
             .child(self.enter(bubble(self.bubble.clone(), self.home_bubble_key()), 0.12))
-            .child(div().mt(px(sp::S)).child(self.dusty.clone()))
+            .child(div().mt(px(sp::S)).child(self.cat()))
             .child(self.enter(div().text_size(px(ts::DISPLAY)).font_weight(FontWeight::BLACK).child("Disk checkup"), 0.16))
             // short windows drop the subtitle so the tools row still fits
             .when(self.view.1 >= 720., |d| d.child(self.enter(subtitle("Dusty sniffs out build leftovers and caches you can safely clear.").text_size(px(ts::LEAD)).line_height(px(ts::LEAD * 1.4)).mt(px(sp::XS)).text_center(), 0.2)))
             .child(self.enter(
-                card().w_full().mt(px(sp::XL)).p(px(CARD_PAD)).flex().flex_col().gap(px(sp::M))
+                card().w_full().mt(px(if compact { sp::M } else { sp::XL })).p(px(CARD_PAD)).flex().flex_col().gap(px(sp::M))
                     .child(
                         div().flex().justify_between().items_end()
                             .child(div().flex().items_end().gap(px(sp::S - 2.)).child(number(format_bytes(d.free), ts::H2, pal().ink)).child(label_small("free").mb(px(sp::XS))))
@@ -119,15 +204,48 @@ impl DustyApp {
             })
             .child(div().flex_1().min_h(px(sp::M)))
             .child(self.enter(button("start", "Start checkup", Btn::Primary(pal().grape), true).on_click(cx.listener(|this, _, _, cx| this.start_scan(cx))), 0.3))
-            .child(self.enter(label_small("Nothing is deleted until you say so."), 0.34).mt(px(sp::XS)))
-            .child(self.enter(self.tool_row(cx), 0.38).mt(px(sp::M)).mb(px(sp::L)))
+            .when(!compact, |d| d.child(self.enter(label_small("Nothing is deleted until you say so."), 0.34).mt(px(sp::XS))))
+            .child(self.enter(self.tool_row(cx), 0.38).mt(px(sp::M)).mb(px(sp::XL)))
+            .into_any_element()
     }
+
+    /// Home in a wide window: Dusty on the left, the checkup and the tools on the right.
+    fn home_wide(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let d = self.disk;
+        let bar_t = self.enter_k(0.3).min(since(self.st(), motion::FILL));
+        let left = div().flex_1().min_w(px(0.)).flex().flex_col().items_center().justify_center()
+            .child(self.enter(bubble(self.bubble.clone(), self.home_bubble_key()), 0.12))
+            .child(div().mt(px(-sp::XL)).child(self.cat()));
+        let hero = false;
+        let right = div().w(px(if hero { 600. } else { SIDE_W + 90. })).flex_none().flex().flex_col().justify_center().gap(px(sp::M))
+            .child(self.enter(div().w_full().text_size(px(ts::HERO * 0.7)).font_weight(FontWeight::BLACK).child("Disk checkup"), 0.16))
+            .child(self.enter(subtitle("Dusty sniffs out build leftovers and caches you can safely clear.").w_full(), 0.2))
+            .child(self.enter(
+                card().w_full().p(px(CARD_PAD)).flex().flex_col().gap(px(sp::M))
+                    .child(
+                        div().flex().justify_between().items_end()
+                            .child(div().flex().items_end().gap(px(sp::S - 2.)).child(number(format_bytes(d.free), if hero { ts::HERO } else { ts::H2 }, pal().ink)).child(label_small("free").mb(px(sp::XS))))
+                            .child(label_small(format!("of {}", format_bytes(d.total))).mb(px(sp::XS))),
+                    )
+                    .child(disk_bar(d, &[], bar_t))
+                    .when_some(self.last_scan.clone(), |el, last| {
+                        let found = if last.total_bytes > 0 { format!("~{} found", format_bytes(last.total_bytes)) } else { "spotless".into() };
+                        el.child(label_small(format!("Last checked {} · {found}", ago(last.age_secs()))).font(tabular(FontWeight::BOLD)))
+                    }),
+                0.24,
+            ))
+            .child(self.enter(button("start", "Start checkup", Btn::Primary(pal().grape), true).on_click(cx.listener(|this, _, _, cx| this.start_scan(cx))), 0.3))
+            .child(self.enter(label_small("Nothing is deleted until you say so."), 0.34));
+        div().flex_1().min_h(px(0.)).flex().items_center().justify_center().gap(px(sp::XXL)).px(px(GUTTER)).pb(px(sp::XL)).child(left).child(right)
+    }
+
 
     pub(super) fn scanning(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let (shown, chips) = self.scan.as_ref().map(|s| (s.shown, s.chips.clone())).unwrap_or_default();
         let newest = chips.last().map(|c| c.0.clone()).unwrap_or_default();
         // five rows in a four-row window: the list slides down one slot as a find arrives, the oldest slides out
-        let rows: Vec<_> = chips.into_iter().rev().take(5).collect();
+        let slots = (((self.view.1 - 650.) / ROW_H).floor() as usize).clamp(4, 9);
+        let rows: Vec<_> = chips.into_iter().rev().take(slots + 1).collect();
         let finds: AnyElement = if rows.is_empty() {
             div().size_full().flex().items_center().justify_center().child(label_small("Nothing big yet. Still sniffing…")).into_any_element()
         } else {
@@ -159,7 +277,7 @@ impl DustyApp {
             .child(div().h(px(sp::S)))
             // fixed-height slot: a one- or two-line bubble never nudges Dusty or the counter
             .child(div().h(px(70.)).flex().items_end().child(bubble(self.bubble.clone(), self.scan.as_ref().map(|s| s.line_i as u64).unwrap_or(0) + self.nav * 1000)))
-            .child(div().mt(px(sp::XS)).child(self.dusty.clone()))
+            .child(div().mt(px(sp::XS)).child(self.cat()))
             .child(number(format_bytes(shown as u64), ts::HERO, pal().grape.base))
             .child(label_small("of leftovers found so far"))
             .child(div().w_full().mt(px(sp::L)).child(busy_bar()))
@@ -167,10 +285,10 @@ impl DustyApp {
             .child(
                 card().w_full().mt(px(sp::L)).px(px(CARD_PAD)).py(px(sp::M)).flex().flex_col()
                     .child(label_small("Latest finds").mb(px(sp::XS)))
-                    .child(div().h(px(4. * ROW_H)).overflow_hidden().child(finds)),
+                    .child(div().h(px(slots as f32 * ROW_H)).overflow_hidden().child(finds)),
             )
             .child(div().flex_1())
-            .child(button("cancel", "Stop", Btn::Ghost, true).on_click(cx.listener(|this, _, _, cx| this.cancel_scan(cx))))
+            .child(div().w_full().flex().justify_center().child(div().w(px(220.)).child(button("cancel", "Stop", Btn::Ghost, true).on_click(cx.listener(|this, _, _, cx| this.cancel_scan(cx))))))
             .child(div().h(px(sp::L)))
     }
 
@@ -191,7 +309,7 @@ impl DustyApp {
         }
     }
 
-    pub(super) fn results(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn results(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let total: u64 = self.live().map(|t| t.bytes).sum();
         let safe = self.safe_bytes();
         let max = self.live().map(|t| t.bytes).max().unwrap_or(1).max(1);
@@ -199,39 +317,45 @@ impl DustyApp {
         // a group whose last item is leaving stays to fade out with it
         let groups: Vec<Group> = Group::ORDER.iter().copied().filter(|g| self.targets.iter().any(|t| t.group == *g)).collect();
         let legend: Vec<Group> = groups.iter().copied().filter(|g| self.live().any(|t| t.group == *g)).collect();
-        let nav = self.nav;
         let empty = self.targets.is_empty();
+        // the cards play their entrance once per scan, not each time you come back to Results
+        let fresh = self.screen_t.elapsed() < Duration::from_secs(3);
 
-        let list = div()
+        let wide = self.is_wide();
+        let head = div().flex().items_center().gap(px(sp::M)).when(self.cat_here() && wide, |d| d.flex_col().text_center()).when(self.cat_here(), |d| d.child(div().flex_none().child(self.dusty.clone()))).child(
+            div().flex().flex_col().gap(px(sp::XS)).flex_1().min_w(px(0.)).when(wide && self.cat_here(), |d| d.items_center())
+                .child(div().text_size(px(if wide { ts::DISPLAY } else { ts::H1 })).line_height(px(ts::H1 * 1.15)).font(tabular(FontWeight::BLACK)).child(format!("Found {}", format_bytes(count_up(total, self.st(), motion::FILL)))))
+                .child(subtitle(if safe > 0 { format!("{} is safe to toss right now.", format_bytes(safe)) } else { "Spotless already.".to_string() })),
+        );
+        let disk_card = card().w_full().p(px(if wide { CARD_PAD } else { sp::M + 2. })).mt(px(if wide { sp::M } else { sp::S })).flex().flex_col().gap(px(sp::S + sp::XXS))
+            .child(div().flex().justify_between().child(label_small(format!("{} free", format_bytes(self.disk.free)))).child(label_small(format!("of {}", format_bytes(self.disk.total)))))
+            .child(disk_bar(self.disk, &segs, since(self.st(), motion::FILL + 400)))
+            .when(wide && !legend.is_empty(), |d| {
+                d.child(div().flex().flex_wrap().gap_x(px(sp::M)).gap_y(px(sp::XS)).children(legend.iter().map(|g| {
+                    div().flex().items_center().gap(px(sp::XS + 1.)).child(div().size(px(10.)).rounded(px(3.)).bg(rgb(tone(*g).base))).child(label_small(g.name()))
+                })))
+            });
+        let mut side = None;
+        let mut list = div()
             .id("results-list")
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
-            .px(px(GUTTER))
-            .child(
-                div().flex().items_center().gap(px(sp::M)).child(div().flex_none().child(self.dusty.clone())).child(
-                    div().flex().flex_col().gap(px(sp::XS)).flex_1().min_w(px(0.))
-                        .child(div().text_size(px(ts::H1)).line_height(px(ts::H1 * 1.15)).font(tabular(FontWeight::BLACK)).child(format!("Found {}", format_bytes(count_up(total, self.nav_t, motion::FILL)))))
-                        .child(subtitle(self.bubble.clone())),
-                ),
-            )
-            .child(
-                card().w_full().p(px(CARD_PAD)).mt(px(sp::M)).flex().flex_col().gap(px(sp::S + sp::XXS))
-                    .child(div().flex().justify_between().child(label_small(format!("{} free", format_bytes(self.disk.free)))).child(label_small(format!("of {}", format_bytes(self.disk.total)))))
-                    .child(disk_bar(self.disk, &segs, since(self.nav_t, motion::FILL + 400)))
-                    .when(!legend.is_empty(), |d| {
-                        d.child(div().flex().flex_wrap().gap_x(px(sp::M)).gap_y(px(sp::XS)).children(legend.iter().map(|g| {
-                            div().flex().items_center().gap(px(sp::XS + 1.)).child(div().size(px(10.)).rounded(px(3.)).bg(rgb(tone(*g).base))).child(label_small(g.name()))
-                        })))
-                    }),
-            )
+            .px(px(GUTTER));
+        if wide {
+            side = Some((head, disk_card));
+        } else {
+            list = list.child(head).child(disk_card);
+        }
+        let list = list
             .when(empty, |d| {
-                d.child(pop_in(
+                d.child(pop_in_if(
+                    fresh,
                     card().mt(px(sp::M)).px(px(sp::XL)).py(px(sp::XL)).flex().flex_col().items_center().gap(px(sp::XS))
                         .child(hero_icon(Ico::Sparkle))
                         .child(div().text_size(px(ts::TITLE)).font_weight(FontWeight::BLACK).child("Nothing to clean"))
                         .child(subtitle("No build leftovers or caches worth clearing right now. Check again after a few builds.").text_center()),
-                    ElementId::NamedInteger("empty".into(), nav),
+                    ElementId::NamedInteger("empty".into(), self.results_gen),
                     motion::STAGGER,
                 ))
             })
@@ -248,14 +372,16 @@ impl DustyApp {
                 let tail = rows.first().map(|r| r.1).unwrap_or(0.);
                 // the whole card leaves when its last item does
                 let (g_fade, g_left) = if live_n == 0 { items.iter().map(|x| self.removal(&x.id)).fold((1f32, 0f32), |a, b| (a.0.min(b.0), a.1.max(b.1))) } else { (0., 1.) };
-                let card_el = pop_in(
-                    card().mt(px(sp::M)).overflow_hidden().child(
+                let card_el = pop_in_if(
+                    fresh,
+                    card().mt(px(if wide { sp::M } else { sp::S })).overflow_hidden().child(
                         div()
                             .id(ElementId::Name(format!("group-{gi}").into()))
                             .flex()
                             .items_center()
                             .gap(px(sp::M))
-                            .p(px(CARD_PAD))
+                            .p(px(if wide { CARD_PAD } else { sp::M }))
+                            .when(wide, |d| d.min_h(px(((self.view.1 - TOP - 120.) / groups.len().max(1) as f32 - sp::M).clamp(88., 140.))))
                             // hover tint follows the card's inner corners (overflow doesn't clip to the radius)
                             .rounded_t(px(radius::XL - 2.))
                             .when(!shown, |d| d.rounded_b(px(radius::XL - 4.)))
@@ -263,19 +389,19 @@ impl DustyApp {
                             .hover(|s| s.bg(rgb(pal().card_hover)))
                             .on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick))
                             .on_click(cx.listener(move |this, _, _, cx| this.toggle_group(g, cx)))
-                            .child(glyph_tile(g, 44.))
+                            .child(glyph_tile(g, if wide { 44. } else { 40. }))
                             .child(
                                 // name and size share the first line; the caption gets the full width under them
                                 div().flex_1().min_w(px(0.)).flex().flex_col().gap(px(sp::XXS))
                                     .child(
                                         div().flex().items_center().gap(px(sp::S))
                                             .child(div().flex_1().min_w(px(0.)).text_size(px(ts::TITLE)).line_height(px(ts::TITLE * 1.25)).font_weight(FontWeight::BLACK).child(g.name()))
-                                            .child(number(format_bytes(sum), ts::TITLE + 1., t.text)),
+                                            .child(number(format_bytes(sum), ts::TITLE + 1., pal().ink)),
                                     )
-                                    .child(label_small(format!("{} · {}", g.blurb(), n_items(live_n)))),
+                                    .child(label_small(if wide { format!("{} · {}", g.blurb(), n_items(live_n)) } else { n_items(live_n) })),
                             )
                             .child(
-                                div().w(px(sp::L)).flex_none().flex().justify_center().text_color(rgb(pal().muted)).font_weight(FontWeight::BLACK).child(if open { "▾" } else { "▸" })
+                                div().w(px(sp::L)).flex_none().flex().justify_center().text_color(rgb(pal().muted)).font_weight(FontWeight::BLACK).text_size(px(ts::LEAD)).child(if open { "▾" } else { "▸" })
                                     .with_animation(ElementId::NamedInteger(format!("chev-{gi}").into(), gen * 2 + open as u64), anim(motion::QUICK + 60), |el, k| el.opacity(0.3 + 0.7 * k).mt(px(-3. * (1. - back_out(k))))),
                             ),
                     ).when(shown, |d| {
@@ -313,7 +439,7 @@ impl DustyApp {
                             )
                         })))
                     }),
-                    ElementId::NamedInteger("gcard".into(), gi as u64 + nav * 10),
+                    ElementId::NamedInteger("gcard".into(), gi as u64 + self.results_gen * 10),
                     motion::STAGGER * (gi as u64 + 1),
                 );
                 if live_n > 0 {
@@ -323,23 +449,32 @@ impl DustyApp {
             }))
             .child(div().h(px(sp::XL)));
 
+        let clean_btn = button("clean-safe", if safe > 0 { format!("Clean {}", format_bytes(safe)) } else { "Nothing safe to clean".into() }, Btn::Primary(pal().mint), safe > 0).on_click(cx.listener(|this, _, _, cx| {
+            this.selected = this.safe_ids();
+            this.open_confirm(cx);
+        }));
+        let choose_btn = button("choose", if wide { "Choose items" } else { "Choose" }, Btn::Ghost, self.live().next().is_some()).on_click(cx.listener(|this, _, _, cx| this.open_pick(cx)));
+        if let Some((head, disk_card)) = side {
+            // wide window: the summary and the actions stay put on the left, the groups scroll on the right
+            return split(
+                div().flex().flex_col().gap(px(sp::S)).child(head).child(disk_card),
+                div().flex().flex_col().gap(px(sp::XS)).child(clean_btn).child(choose_btn),
+                list.px(px(sp::S)),
+            )
+            .into_any_element();
+        }
         div()
             .flex_1()
             .min_h(px(0.))
             .flex()
             .flex_col()
             .child(list)
-            .child(
-                footer(pal().bg)
-                    .child(button("clean-safe", if safe > 0 { format!("Clean {}", format_bytes(safe)) } else { "Nothing safe to clean".into() }, Btn::Primary(pal().mint), safe > 0).on_click(cx.listener(|this, _, _, cx| {
-                        this.selected = this.safe_ids();
-                        this.open_confirm(cx);
-                    })))
-                    .child(button("choose", "Choose items", Btn::Ghost, self.live().next().is_some()).on_click(cx.listener(|this, _, _, cx| this.open_pick(cx)))),
-            )
+            // one row: the primary action leads, the secondary one is smaller beside it
+            .child(footer(pal().bg).child(div().flex().gap(px(sp::M)).child(div().w(relative(0.62)).min_w(px(0.)).child(clean_btn)).child(div().flex_1().min_w(px(0.)).child(choose_btn))))
+            .into_any_element()
     }
 
-    pub(super) fn pick(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(super) fn pick(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let sel_n = self.selected.len();
         let dry = self.dry_run;
         let chip = |id: &'static str, ico: Option<Ico>, label: &'static str, on: bool| {
@@ -367,16 +502,10 @@ impl DustyApp {
         let all_safe = self.selected == self.safe_ids();
         let all = self.selected.len() == self.live().count();
 
-        let list = div()
-            .id("pick-list")
-            .flex_1()
-            .min_h(px(0.))
-            .overflow_y_scroll()
-            .track_scroll(&self.pick_scroll)
-            .px(px(GUTTER))
-            .child(div().text_size(px(ts::H1)).line_height(px(ts::H1 * 1.15)).font_weight(FontWeight::BLACK).child("What should Dusty eat?"))
-            .child(subtitle("Pre-ticked items rebuild themselves. Purple ones cost a download later.").mt(px(sp::XS)))
-            .child(
+        let wide = self.is_wide();
+        let title_el = div().text_size(px(ts::H1)).line_height(px(ts::H1 * 1.15)).font_weight(FontWeight::BLACK).child("What should Dusty eat?").into_any_element();
+        let sub_el = subtitle("Pre-ticked items rebuild themselves. Purple ones cost a download later.").mt(px(sp::XS)).into_any_element();
+        let chips_el = 
                 div().flex().flex_wrap().items_center().gap(px(sp::S)).mt(px(sp::M))
                     .child(chip("q-safe", Some(Ico::Sparkle), "Safe picks", all_safe).on_click(cx.listener(|this, _, _, cx| {
                         this.selected = this.safe_ids();
@@ -419,8 +548,22 @@ impl DustyApp {
                             }))
                             .child("Practice run")
                             .child(switch("practice", dry, pal().sky)),
-                    ),
-            )
+                    )
+            .into_any_element();
+        let mut intro = None;
+        let mut list = div()
+            .id("pick-list")
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll()
+            .track_scroll(&self.pick_scroll)
+            .px(px(GUTTER));
+        if wide {
+            intro = Some((title_el, sub_el, chips_el));
+        } else {
+            list = list.child(title_el).child(sub_el).child(chips_el);
+        }
+        let list = list
             // headers and items are direct children of the scroll list, so ↑ ↓ can scroll a row into view
             .children(self.pick_rows().into_iter().map(|(g, item)| {
                 let t = tone(g);
@@ -435,7 +578,7 @@ impl DustyApp {
                     };
                     return div().mt(px(sp::XL * left)).when(left < 1., |d| d.h(px(HIT * left)).overflow_hidden()).opacity(1. - fade).flex().items_center().gap(px(sp::S))
                         .child(icon_label(glyph(g), ts::TITLE, g.name()).flex_none().text_size(px(ts::TITLE)).font_weight(FontWeight::BLACK).text_color(rgb(t.text)))
-                        .child(fill_line(label_small(g.blurb())))
+                        .child(if wide { fill_line(label_small(g.blurb())) } else { div().flex_1() })
                         .child(
                             div()
                                 .id(ElementId::Name(format!("all-{:?}", g).into()))
@@ -452,7 +595,7 @@ impl DustyApp {
                                 .hover(|s| s.bg(rgb(t.soft)))
                                 .active(|s| s.opacity(0.7))
                                 .on_mouse_down(MouseButton::Left, |_, _, _| haptic(Haptic::Tick))
-                                .child(if all_on { "NONE" } else { "ALL" })
+                                .child(if all_on { "CLEAR" } else { "SELECT ALL" })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     let all_on = ids.iter().all(|i| this.selected.contains(i));
                                     for i in &ids {
@@ -475,7 +618,7 @@ impl DustyApp {
                 let (fade, left) = self.removal(&x.id);
                 let hovered = fade == 0. && self.hovered_row.as_deref() == Some(x.id.as_str());
                 let ringed = fade == 0. && self.pick_ring && self.pick_focus.as_deref() == Some(x.id.as_str());
-                let detail = x.detail.clone().unwrap_or_else(|| if !x.paths.is_empty() { format!("{} paths", x.paths.len()) } else if let Some(c) = x.commands.first() { format!("runs {}", c.cmd) } else { String::new() });
+                let detail = x.detail.clone().unwrap_or_else(|| if !x.paths.is_empty() { format!("{} path{}", x.paths.len(), plural_s(x.paths.len())) } else if let Some(c) = x.commands.first() { format!("runs {}", c.cmd) } else { String::new() });
                 let row = div()
                     .id(ElementId::Name(format!("item-{}", x.id).into()))
                     .flex()
@@ -514,7 +657,7 @@ impl DustyApp {
                             .child(div().text_size(px(ts::LEAD)).font_weight(FontWeight::BLACK).one_line().child(x.label.clone()))
                             .when(!detail.is_empty(), |d| d.child(label_small(detail).one_line())),
                     )
-                    .when(hovered, |d| d.child(self.row_actions(&x, cx)))
+                    .when(hovered || ringed, |d| d.child(self.row_actions(&x, cx)))
                     .child(
                         div().flex_none().flex().flex_col().items_end().gap(px(sp::XXS))
                             .child(number(format_bytes(x.bytes), ts::LEAD, if on { t.text } else { pal().ink }))
@@ -530,11 +673,10 @@ impl DustyApp {
             }))
             .child(div().h(px(sp::XL)));
 
-        div().flex_1().min_h(px(0.)).flex().flex_col().child(list).child(
-            footer(pal().card)
+        let footer_el = footer(pal().card)
                 .gap(px(sp::S - 2.))
                 .child(
-                    div().flex().items_center().gap(px(sp::M)).child(div().flex_none().child(self.dusty.clone())).child(
+                    div().flex().items_center().gap(px(sp::M)).when(self.cat_here(), |d| d.child(div().flex_none().child(self.dusty.clone()))).child(
                         div().flex().flex_col().flex_1().min_w(px(0.))
                             .child(
                                 div().flex().items_end().gap(px(sp::S - 2.))
@@ -545,8 +687,22 @@ impl DustyApp {
                             .child(div().text_size(px(ts::SMALL)).font_weight(FontWeight::SEMIBOLD).text_color(rgb(pal().muted)).one_line().child(self.bubble.clone())),
                     ),
                 )
-                .child(button("pick-go", if dry { format!("Practice with {}", n_items(sel_n)) } else { format!("Clean {}", n_items(sel_n)) }, Btn::Primary(pal().mint), sel_n > 0).on_click(cx.listener(|this, _, _, cx| this.open_confirm(cx)))),
-        )
+                .child(button("pick-go", if dry { format!("Practice with {}", n_items(sel_n)) } else { format!("Clean {}", n_items(sel_n)) }, Btn::Primary(pal().mint), sel_n > 0).on_click(cx.listener(|this, _, _, cx| this.open_confirm(cx))));
+        if let Some((t, sub, chips)) = intro {
+            // wide window: title, quick picks and the total stay on the left; the items scroll on the right
+            let summary = div().flex().flex_col().gap(px(sp::M)).child(t).child(sub).child(chips);
+            let total = div().flex().flex_col().gap(px(sp::S)).child(
+                div().flex().items_center().gap(px(sp::M)).when(self.cat_here(), |d| d.child(div().flex_none().child(self.dusty.clone()))).child(
+                    div().flex().flex_col().flex_1().min_w(px(0.))
+                        .child(div().flex().items_end().gap(px(sp::S - 2.)).child(div().flex_none().text_size(px(ts::LEAD)).font_weight(FontWeight::BLACK).mb(px(sp::XXS)).child("Free up")).child(number(format_bytes(self.pick_shown.round() as u64), ts::H2, pal().mint.text)))
+                        .child(label_small(n_items(sel_n)).font(tabular(FontWeight::BOLD))),
+                ),
+            );
+            let go = button("pick-go", if dry { format!("Practice with {}", n_items(sel_n)) } else { format!("Clean {}", n_items(sel_n)) }, Btn::Primary(pal().mint), sel_n > 0).on_click(cx.listener(|this, _, _, cx| this.open_confirm(cx)));
+            let _ = footer_el;
+            return split(summary, div().flex().flex_col().gap(px(sp::L)).child(total).child(go), list.px(px(sp::S))).into_any_element();
+        }
+        div().flex_1().min_h(px(0.)).flex().flex_col().child(list).child(footer_el).into_any_element()
     }
 
     pub(super) fn confirm_sheet(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -575,10 +731,11 @@ impl DustyApp {
             kind => self.tool_sheet_text(kind),
         };
         // in: backdrop fades, sheet springs up. out: both leave faster than they came.
-        let k_in = since(self.nav_t, motion::SHEET);
+        let k_in = since(self.sheet_t, motion::SHEET);
         let k_out = self.confirm_closing.map(|t| since(t, motion::EXIT)).unwrap_or(0.);
-        let backdrop = since(self.nav_t, motion::BASE) * (1. - k_out);
-        let drop = 380. * (1. - back_out(k_in)) + 420. * k_out * k_out;
+        let backdrop = since(self.sheet_t, motion::BASE) * (1. - k_out);
+        let wide = self.is_wide();
+        let drop = if wide { 24. * (1. - ease_out_cubic(k_in)) + 16. * k_out } else { 380. * (1. - back_out(k_in)) + 420. * k_out * k_out };
         div()
             .id("sheet-wrap")
             .absolute()
@@ -586,14 +743,19 @@ impl DustyApp {
             .occlude()
             .flex()
             .flex_col()
-            .justify_end()
+            .when(wide, |d| d.justify_center().items_center())
+            .when(!wide, |d| d.justify_end())
             .child(div().id("sheet-bg").absolute().inset_0().bg(alpha(pal().scrim, pal().scrim_a)).opacity(backdrop).on_click(cx.listener(|this, _, _, cx| this.close_confirm(cx))))
             .child(
                 div()
                     .id("sheet")
                     .relative()
+                    .w_full()
+                    .max_w(px(if wide { 460. } else { MAX_W }))
+                    .mx_auto()
                     .bg(rgb(pal().card))
-                    .rounded_t(px(radius::SHEET))
+                    .when(wide, |d| d.rounded(px(radius::SHEET)).border_2().pt(px(sp::XL)))
+                    .when(!wide, |d| d.rounded_t(px(radius::SHEET)))
                     .border_t_2()
                     .border_color(rgb(pal().line))
                     .px(px(GUTTER))
@@ -653,7 +815,7 @@ impl DustyApp {
                     })
                     .child(label_small(if waiting && !shaking { "Working on it…".to_string() } else if remaining > 0 { format!("+{remaining} more after this") } else { String::new() })),
             )
-            .child(div().mt(px(sp::S - 2.)).child(self.dusty.clone()))
+            .child(div().mt(px(sp::S - 2.)).child(self.cat()))
             .child(bubble(self.bubble.clone(), job.next as u64 + 7777))
             .child(number(format_bytes(job.shown as u64), ts::HERO, pal().mint.text).mt(px(sp::S)))
             .child(label_small(if job.dry { "would be freed (practice run)" } else { "eaten so far" }))
@@ -714,14 +876,14 @@ impl DustyApp {
         let job_dry = self.clean.as_ref().map(|j| j.dry).unwrap_or(false);
         let ok = self.clean.as_ref().map(|j| j.ok_count).unwrap_or(0);
         let failed = self.clean.as_ref().map(|j| j.failed.clone()).unwrap_or_default();
-        let freed = count_up(self.done_freed, self.nav_t, motion::FILL + 300);
+        let freed = count_up(self.done_freed, self.st(), motion::FILL + 300);
         let estimated = self.done_estimated;
         let disk = self.done_disk;
         let before = self.done_before;
         // what free space reads after: the real disk, or (practice run / estimate) before + what was eaten
         let after_free = if job_dry || estimated { (before.free + self.done_freed).min(before.total) } else { disk.free.max(before.free) };
         // the freed slice waits for the card to land, then melts away
-        let melt = since(self.nav_t + Duration::from_millis(3 * motion::STAGGER + motion::ENTER), motion::FILL + 200);
+        let melt = since(self.st() + Duration::from_millis(3 * motion::STAGGER + motion::ENTER), motion::FILL + 200);
         let nav = self.nav;
         let stat = |label: &'static str, value: String, t: Tone, delay: u64, i: u64| {
             let total = motion::ENTER + delay;
@@ -746,7 +908,7 @@ impl DustyApp {
             .child(
                 div().flex().flex_col().items_center()
                     .child(bubble(self.bubble.clone(), nav))
-                    .child(div().mt(px(sp::XS)).child(self.dusty.clone()))
+                    .child(div().mt(px(sp::XS)).child(self.cat()))
                     .child(div().text_size(px(ts::LEAD)).font_weight(FontWeight::BLACK).text_color(rgb(pal().muted)).child(if job_dry { "Would free" } else if estimated { "Freed (estimated)" } else { "Freed" }))
                     .child(number(format_bytes(freed), ts::HERO_XL, pal().mint.text)),
             )

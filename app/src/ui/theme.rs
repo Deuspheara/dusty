@@ -4,6 +4,14 @@ use super::*;
 
 pub const FONT: &str = ".SystemUIFont";
 pub(super) const TOP: f32 = 54.; // the draggable band under the transparent titlebar
+/// Widest the content column grows; a wider window centers it.
+pub(super) const MAX_W: f32 = 560.;
+/// Below this window height the home screen drops its small print so the tools row still fits.
+pub(super) const COMPACT_H: f32 = 690.;
+/// From this window width, Home, Results and Choose items use two panes.
+pub(super) const WIDE_W: f32 = 880.;
+/// Width of the left pane (Results, Choose items); Home's right pane is a bit wider.
+pub(super) const SIDE_W: f32 = 380.;
 pub(super) const ROW_H: f32 = 36.; // a row in the checkup's "latest finds" card
 
 /// Spacing scale (px). Every padding, gap and margin comes from here.
@@ -22,6 +30,8 @@ pub(super) const GUTTER: f32 = sp::XL;
 /// Inner padding of every card.
 pub(super) const CARD_PAD: f32 = sp::L;
 /// Minimum size of anything clickable.
+pub(super) const SIDE_NAV: f32 = 208.;
+pub(super) const SIDE_CAT: f32 = 150.;
 pub(super) const HIT: f32 = 28.;
 
 /// Corner radii.
@@ -88,14 +98,20 @@ pub(super) fn refresh_reduced() {
 
 /// A one-shot animation of `ms`, or (almost) instant under Reduce motion.
 pub(super) fn anim(ms: u64) -> Animation {
-    Animation::new(Duration::from_millis(if reduced() { 1 } else { ms }))
+    Animation::new(Duration::from_millis(if reduced() { 1 } else { (ms as f32 * slowmo()) as u64 }))
+}
+
+/// `DUSTY_SLOWMO=6` plays every transition 6× slower, to review them frame by frame (read once).
+pub(super) fn slowmo() -> f32 {
+    static SLOW: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *SLOW.get_or_init(|| std::env::var("DUSTY_SLOWMO").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.).clamp(1., 20.))
 }
 /// The same, for durations measured by hand (seconds).
 pub(super) fn secs(ms: u64) -> f32 {
     if reduced() {
         0.001
     } else {
-        ms as f32 / 1000.
+        ms as f32 / 1000. * slowmo()
     }
 }
 /// Progress 0..1 of something that started at `t0` and lasts `ms` (instant under Reduce motion).
@@ -119,8 +135,11 @@ pub(super) fn ago(secs: u64) -> String {
 }
 
 /// Dusty on the home screen: full size, a bit smaller when the window is short (the tools row needs room).
-pub(super) fn home_dusty_side(window_h: f32) -> f32 {
-    (window_h - 590.).clamp(120., 250.)
+pub(super) fn home_dusty_side(window_w: f32, window_h: f32) -> f32 {
+    if window_w >= WIDE_W {
+        return (window_h - 300.).clamp(200., 400.);
+    }
+    (window_h - 590.).clamp(110., 300.)
 }
 
 pub(super) use dusty_core::now_secs;
@@ -174,22 +193,22 @@ pub(super) struct Palette {
 pub(super) const LIGHT: Palette = Palette {
     bg: 0xFFFBF5,
     ink: 0x2B2340,
-    muted: 0x8A84A3,
-    line: 0xE8E4F3,
+    muted: 0x6E6889,
+    line: 0xDAD4EC,
     card: 0xFFFFFF,
     card_hover: 0xFCFBFF,
-    used: 0xBAB3CF,
+    used: 0xA39BC0,
     disabled_edge: 0xD4CFE4,
     scrim: 0x2B2340,
     scrim_a: 0.45,
     warn: 0x8A6000,
     grape: Tone { base: 0x7C5CFF, edge: 0x5B3FD9, soft: 0xEFEAFF, hover: 0x8B6EFF, text: 0x5B3FD9 },
-    mint: Tone { base: 0x22C993, edge: 0x169E72, soft: 0xDFF8EE, hover: 0x2ED69F, text: 0x169E72 },
-    coral: Tone { base: 0xFF5A6E, edge: 0xD63D52, soft: 0xFFE5E9, hover: 0xFF6B7D, text: 0xD63D52 },
-    sun: Tone { base: 0xFFC83D, edge: 0xE0A100, soft: 0xFFF4D6, hover: 0xFFD25E, text: 0xE0A100 },
-    sky: Tone { base: 0x3DB8FF, edge: 0x1E93D6, soft: 0xE3F5FF, hover: 0x55C1FF, text: 0x1E93D6 },
-    blue: Tone { base: 0x5B8DEF, edge: 0x3F6FD1, soft: 0xE6EEFF, hover: 0x6E9BF2, text: 0x3F6FD1 },
-    teal: Tone { base: 0x2EC4B6, edge: 0x1E9C90, soft: 0xDDF7F4, hover: 0x45D0C3, text: 0x1E9C90 },
+    mint: Tone { base: 0x22C993, edge: 0x169E72, soft: 0xDFF8EE, hover: 0x2ED69F, text: 0x0E7A56 },
+    coral: Tone { base: 0xFF5A6E, edge: 0xD63D52, soft: 0xFFE5E9, hover: 0xFF6B7D, text: 0xC22F44 },
+    sun: Tone { base: 0xFFC83D, edge: 0xE0A100, soft: 0xFFF4D6, hover: 0xFFD25E, text: 0x8F6A00 },
+    sky: Tone { base: 0x3DB8FF, edge: 0x1E93D6, soft: 0xE3F5FF, hover: 0x55C1FF, text: 0x1573AB },
+    blue: Tone { base: 0x5B8DEF, edge: 0x3F6FD1, soft: 0xE6EEFF, hover: 0x6E9BF2, text: 0x2F5BBA },
+    teal: Tone { base: 0x2EC4B6, edge: 0x1E9C90, soft: 0xDDF7F4, hover: 0x45D0C3, text: 0x167A70 },
 };
 
 /// Night: plum surfaces, tones kept vivid, accent text lifted so it reads on dark cards.

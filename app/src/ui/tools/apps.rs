@@ -274,9 +274,7 @@ impl DustyApp {
                 let key = a.path.to_string_lossy().into_owned();
                 let ringed = self.tool_ring(i);
                 let blocked = a.running || !a.writable;
-                let sub = if a.running {
-                    "Open right now: quit it first".to_string()
-                } else {
+                let sub = {
                     let mut s = a.version.clone().map(|v| format!("v{v}")).unwrap_or_default();
                     if let Some(t) = a.last_used {
                         if !s.is_empty() {
@@ -313,13 +311,15 @@ impl DustyApp {
                     .child(
                         div().flex_1().min_w(px(0.)).flex().flex_col().gap(px(sp::XXS))
                             .child(div().text_size(px(ts::LEAD)).font_weight(FontWeight::BLACK).one_line().child(a.name.clone()))
-                            .when(!sub.is_empty(), |d| d.child(label_small(sub).one_line().when(a.running, |d| d.text_color(rgb(pal().warn))))),
+                            .when(!sub.is_empty(), |d| d.child(label_small(sub).one_line()))
+                            // narrow windows: the chips sit under the name, so the name keeps the width
+                            .when(!self.is_wide() && (a.running || !a.writable), |d| d.child(div().flex().gap(px(sp::XS)).when(a.running, |d| d.child(small_chip("OPEN", pal().sun))).when(!a.writable, |d| d.child(small_chip("NEEDS ADMIN", pal().sky))))),
                     )
                     .child(
-                        div().flex_none().flex().flex_col().items_end().gap(px(sp::XXS))
-                            .child(number(format_bytes(a.bytes), ts::LEAD, if blocked { pal().muted } else { pal().sky.text }))
-                            .when(!a.writable, |d| d.child(small_chip("NEEDS ADMIN", pal().sky)))
-                            .when(a.running && a.writable, |d| d.child(small_chip("OPEN", pal().sun))),
+                        div().flex_none().flex().items_center().gap(px(sp::S))
+                            .when(self.is_wide() && a.running, |d| d.child(small_chip("OPEN", pal().sun)))
+                            .when(self.is_wide() && !a.writable, |d| d.child(small_chip("NEEDS ADMIN", pal().sky)))
+                            .child(number(format_bytes(a.bytes), ts::LEAD, if blocked { pal().muted } else { pal().ink })),
                     );
                 div().mt(px(sp::S - 2. * RING_PAD)).py(px(RING_PAD)).child(row)
             }))
@@ -330,7 +330,7 @@ impl DustyApp {
             .flex()
             .flex_col()
             .child(div().px(px(GUTTER)).pb(px(sp::S)).child(self.tool_header("Uninstall apps")).child(search))
-            .child(list)
+            .child(fade_top(list, pal().bg))
             .into_any_element()
     }
 
@@ -357,7 +357,7 @@ impl DustyApp {
                             .child(label_small(tildify(&a.path)).one_line())
                             .child(label_small([a.version.clone().map(|v| format!("Version {v}")), a.last_used.map(|t| format!("opened {}", ago(secs_since(t))))].into_iter().flatten().collect::<Vec<_>>().join(" · ")).one_line()),
                     )
-                    .child(number(format_bytes(a.bytes), ts::TITLE + 1., p.sky.text)),
+                    .child(number(format_bytes(a.bytes), ts::TITLE + 1., p.ink)),
             );
 
         if let Some(r) = result {

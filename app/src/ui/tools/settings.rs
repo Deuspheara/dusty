@@ -4,7 +4,7 @@ use super::*;
 
 impl DustyApp {
     pub(super) fn load_settings(&mut self, cx: &mut Context<Self>) {
-        self.bubble = "Little knobs. Nothing here deletes anything.".into();
+        self.bubble = "Little knobs. You stay in charge.".into();
         self.dusty(cx, |d| d.st.set(Mood::Idle, None));
         self.tools.ignore = Some(dusty_core::ignore_entries());
         let task = cx.background_spawn(async move { schedule::is_scheduled() });
@@ -100,9 +100,9 @@ impl DustyApp {
             .child(pop_in(
                 card().mt(px(sp::M)).p(px(CARD_PAD)).flex().flex_col().gap(px(sp::S))
                     .child(toggle_row("sched", Ico::Schedule, "Weekly safe clean", sched_on, p.mint, sched.is_some() && !self.tools.schedule_busy).on_click(cx.listener(|this, _, _, cx| this.toggle_schedule(cx))))
-                    .child(subtitle("Every Sunday at 11:00, or as soon as your Mac wakes up. Safe picks only: never anything you'd have to re-download, and build folders you touched this week stay. Caches are deleted, the rest goes to the Trash. Each run shows up in History."))
-                    .child(label_small(if self.tools.schedule_busy { "Talking to launchd…".to_string() } else if sched_on { "On · runs while Dusty is closed, too".to_string() } else if sched.is_none() { "Checking…".to_string() } else { "Off".to_string() }).font(tabular(FontWeight::BOLD)))
-                    .when(!in_apps, |d| d.child(label_small(format!("It runs Dusty from {exe}. Move Dusty to Applications first, or turn it off and on again after moving it."))))
+                    .child(subtitle("Every Sunday at 11:00, or when your Mac wakes up. Safe picks only: caches are deleted, the rest goes to the Trash.").text_size(px(ts::SMALL)))
+                    .when(self.tools.schedule_busy || sched_on || sched.is_none(), |d| d.child(label_small(if self.tools.schedule_busy { "Talking to launchd…".to_string() } else if sched_on { "On · runs while Dusty is closed, too".to_string() } else { "Checking…".to_string() }).font(tabular(FontWeight::BOLD))))
+                    .when(!in_apps && !cfg!(debug_assertions), |d| d.child(label_small(format!("It runs Dusty from {exe}. Move Dusty to Applications first, or turn it off and on again after moving it."))))
                     .when_some(self.tools.schedule_note.clone(), |d, e| d.child(notice(p.sun, p.warn).child(e))),
                 ElementId::NamedInteger("set-sched".into(), nav),
                 motion::STAGGER,
@@ -137,7 +137,7 @@ impl DustyApp {
                     .child(label_small(format!("Dusty skips these everywhere ({}).", tildify(&dusty_core::ignore_file()))))
                     .map(|d| match ignore {
                         Err(e) => d.child(notice(p.sun, p.warn).child(e)),
-                        Ok(list) if list.is_empty() => d.child(subtitle("Nothing on it yet. Hover an item on Results and tap “Never clean this” to add one.")),
+                        Ok(list) if list.is_empty() => d.child(subtitle("Nothing on it yet. Hover an item on Results and tap “Never clean this” to add one.").text_size(px(ts::SMALL))),
                         Ok(list) => d.children(list.into_iter().enumerate().map(|(i, e)| {
                             let entry = e.clone();
                             div().flex().items_center().gap(px(sp::S)).py(px(sp::XS)).when(i > 0, |d| d.border_t_1().border_color(rgb(p.line)))
