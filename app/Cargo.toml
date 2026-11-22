@@ -46,7 +46,7 @@ profile = ["gpui/profiler"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"
-metal = "0.29"
+metal = "0.33"
 
 [profile.dev]
 opt-level = 3
