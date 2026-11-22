@@ -11,6 +11,7 @@ app/
    ├─ dusty-core/            the engine, no UI: everything the app and the CLI do goes through it
    │  ├─ catalog/*.toml      what can be cleaned, as data (project rules, system targets)
    │  └─ src/                scan (projects, catalog, providers) → plan → execute (clean, trash, history)
+   ├─ dusty-ai/              "Look further": a small ACP client and the agent list (Claude, Codex, Gemini, Copilot…)
    └─ dusty-cli/             the `dusty` command: argument parsing and output only
 ```
 
@@ -42,6 +43,18 @@ cargo run -p dusty-cli -- scan   # the CLI from source
   your home, depth 2, tap to drill in, breadcrumb back, honest "partial" when the time budget runs out), *History*
   (Put back) and *Settings* (weekly safe clean, menu bar item, practice run, ignore list). Every slow step runs on a
   background thread with a Stop; removals go through the confirm sheet and land in the Trash.
+- **Look further** (`src/ui/tools/explore.rs`, engine in `crates/dusty-ai`, rules in `dusty-core/src/explore.rs`):
+  the survey lists big folders in `~/Library` and dot folders that the checkup and the ignore list don't cover,
+  described by name, size, age and owning app only. The agent (`dusty_ai::AGENTS`, pinned versions from the ACP
+  registry, run with `npx` or the installed binary) is locked down first: Claude with `tools: []` and no user
+  settings or MCP servers, the others switched to their read-only mode (`read-only`, `plan`, `ask`…; none means it
+  isn't asked). Every permission request is refused, and a reported edit, move or delete ends the trip. The account
+  it reports (`auth/status_update`) is shown and kept in `~/.config/dusty/agents.json` with your pick. It answers
+  in JSON and may ask to look inside up to 6 folders, twice. `explore::check` then refuses anything it wasn't shown,
+  code (git repos), protected or ignored paths, whole data folders of installed apps and apps that are open.
+  `~/.config/dusty/explore.json` remembers what was shown (skipped until it grows by a quarter) and what was
+  suggested (offered again without asking). Picks go to the Trash (history source `explore`); **Remember** writes
+  unticked `[[target]]`s to `~/.config/dusty/catalog.toml`.
 - **Put back needs the Trash:** macOS keeps `~/.Trash` private, so without Full Disk Access Dusty can't move things
   back out and says so (drag it back in Finder instead).
 - **Window:** content runs edge to edge under a transparent titlebar; the top 54 px band drags the window (double-click zooms).
@@ -79,8 +92,8 @@ cargo run -p dusty-cli -- scan   # the CLI from source
   shows a state without a feed; `DUSTY_UPDATE_FEED=<url> DUSTY_UPDATE_CHECK=1` checks a test feed at launch.
 - **Reduce motion:** follows the macOS setting (no splash, confetti or slides); `DUSTY_REDUCE_MOTION=1|0` forces it.
 - **Testing:** `DUSTY_FORCE_DRY=1` forces every clean into a practice run at the engine level
-  (`open --env DUSTY_FORCE_DRY=1 target/Dusty.app`). `DUSTY_OPEN=apps|large|usage|history|settings` opens a tool
-  at launch. `dusty scan` (the CLI) prints a scan, `Dusty --bench` measures Dusty (CPU vs GPU), `DUSTY_TRACE=1` logs
+  (`open --env DUSTY_FORCE_DRY=1 target/Dusty.app`). `DUSTY_OPEN=apps|large|usage|explore|history|settings` opens a tool
+  at launch (`explore-go` also starts a Look further trip, `menu` opens the narrow-window menu). `dusty scan` (the CLI) prints a scan, `Dusty --bench` measures Dusty (CPU vs GPU), `DUSTY_TRACE=1` logs
   frame rates and startup time.
 - **Engine extras** (`crates/dusty-core/src/`): move to Trash + clean history with put back (`trash.rs`, `history.rs`,
   `~/Library/Application Support/Dusty/history.jsonl`), app uninstaller with strict leftover matching (`uninstall.rs`),

@@ -71,6 +71,13 @@ Under **Start checkup** on the home screen:
   Matching is strict, anything that may hold real data starts unticked, and Apple's apps and open apps are left alone.
 - 🐘 **Big & old files**: large or long-unopened files in Downloads, Desktop, Movies and Documents. Nothing is ticked.
 - 🗺️ **What's using space**: a map of your home folder, biggest blocks first. Tap a block to look inside. Read-only.
+- 🔭 **Look further**: asks an AI agent you pick (Claude, Codex, Gemini CLI, GitHub Copilot, Cursor or OpenCode,
+  over the [Agent Client Protocol](https://agentclientprotocol.com), with your own sign-in and subscription; the
+  screen shows which account it used) about the big folders a checkup doesn't know, and lists what it thinks can
+  go, each with its reasons. The agent only gets folder names, sizes and ages. Claude runs with no tools; the
+  others run in their read-only mode (an agent without one isn't asked), and a trip stops if an agent reports
+  changing a file. Every suggestion passes Dusty's own safety checks. Nothing is ticked; picks go to the Trash,
+  and **Remember** adds them to your catalog so checkups find them next time. npm-based agents need Node.js.
 - 🕰️ **History**: every clean, uninstall and big-file trip, with **Put back** for whatever is still in the Trash.
 - ⚙️ **Settings**: a weekly safe clean (Sundays 11:00), the menu bar item, practice runs and your ignore list.
 
@@ -150,6 +157,8 @@ dusty -r ~/Code ~/Work     # scan these roots instead
 dusty --trash              # move to the Trash instead of deleting
 dusty history              # past cleans; `dusty put-back <id>` undoes a trashed one
 dusty large                # review big / long-unused files (nothing preselected, picks go to the Trash)
+dusty explore              # ask an AI agent about what a checkup doesn't know (nothing preselected, picks go to the Trash)
+dusty explore --agents     # which agents are ready here, and the account each used; --agent codex picks one
 dusty schedule on          # weekly safe clean (off | status)
 dusty clean --json -n      # the plan as JSON, touching nothing (for scripts and agents)
 dusty clean --json -y      # clean the default selection, print the plan and the report
