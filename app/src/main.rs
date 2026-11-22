@@ -5,6 +5,7 @@ mod dusty;
 mod platform;
 mod ui;
 mod updater;
+mod wake;
 
 use std::borrow::Cow;
 
@@ -34,12 +35,12 @@ fn menus(current: platform::IconVariant) -> Vec<Menu> {
         items.push(MenuItem::separator());
     }
     items.extend([
-        MenuItem::submenu(Menu { name: "App Icon".into(), items: platform::IconVariant::ALL.into_iter().map(item).collect() }),
+        MenuItem::submenu(Menu { name: "App Icon".into(), items: platform::IconVariant::ALL.into_iter().map(item).collect(), disabled: false }),
         MenuItem::action(ticked("Show in Menu Bar", platform::menu_bar_enabled()), ToggleMenuBar),
         MenuItem::separator(),
         MenuItem::action("Quit Dusty", Quit),
     ]);
-    vec![Menu { name: "Dusty".into(), items }]
+    vec![Menu { name: "Dusty".into(), items, disabled: false }]
 }
 
 fn set_icon(v: platform::IconVariant, cx: &mut App) {
@@ -143,7 +144,7 @@ fn main() {
         let _ = dusty::rig();
     });
 
-    Application::new().with_assets(ui::icons::Assets).run(|cx: &mut App| {
+    gpui_platform::application().with_assets(ui::icons::Assets).run(|cx: &mut App| {
         if let Ok(font) = std::fs::read("/System/Library/Fonts/SFNSRounded.ttf") {
             let _ = cx.text_system().add_fonts(vec![Cow::Owned(font)]);
         }
@@ -174,7 +175,8 @@ fn main() {
         // the 🐾 free-space item in the menu bar (Dusty → Show in Menu Bar turns it off)
         platform::status_item_show(platform::menu_bar_enabled());
         ui::refresh_status_title();
-        cx.on_window_closed(|cx| {
+        dusty::watch_thermal(cx).detach();
+        cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();
             }

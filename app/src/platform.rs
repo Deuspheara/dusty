@@ -389,13 +389,16 @@ fn status_target() -> *mut objc::runtime::Object {
     extern "C" fn open(_: &Object, _: Sel, _: *mut Object) {
         bring_to_front();
         STATUS_REQUEST.store(3, std::sync::atomic::Ordering::Relaxed);
+        crate::wake::ping();
     }
     extern "C" fn check(_: &Object, _: Sel, _: *mut Object) {
         bring_to_front();
         STATUS_REQUEST.store(1, std::sync::atomic::Ordering::Relaxed);
+        crate::wake::ping();
     }
     extern "C" fn quit(_: &Object, _: Sel, _: *mut Object) {
         STATUS_REQUEST.store(2, std::sync::atomic::Ordering::Relaxed);
+        crate::wake::ping();
     }
     *TARGET.get_or_init(|| unsafe {
         let cls: &Class = match Class::get("DustyStatusTarget") {

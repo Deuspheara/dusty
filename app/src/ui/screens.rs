@@ -856,7 +856,7 @@ impl DustyApp {
                 d.child(
                     div().absolute().left(px(x - w / 2.)).top(px(y - TOP - 26. * s)).w(px(w)).opacity((1.4 - p).min(1.)).child(
                         div().flex().items_center().gap(px(sp::S * s)).px(px(sp::M * s)).py(px(10. * s)).rounded(px(radius::L * s)).bg(rgb(pal().card)).border_2().border_b_4().border_color(rgb(tn.base))
-                            .shadow(vec![BoxShadow { color: alpha(pal().scrim, pal().scrim_a / 3.), offset: point(px(0.), px(8. * s)), blur_radius: px(16. * s), spread_radius: px(0.) }])
+                            .shadow(vec![BoxShadow { color: alpha(pal().scrim, pal().scrim_a / 3.), offset: point(px(0.), px(8. * s)), blur_radius: px(16. * s), spread_radius: px(0.), inset: false }])
                             .child(icon_raster(glyph(t.group), 22., 22. * s))
                             .child(div().text_size(px((ts::LEAD * s).max(5.))).font_weight(FontWeight::BLACK).one_line().child(t.label.clone())),
                     ),
@@ -1070,7 +1070,7 @@ impl DustyApp {
                         .size(px(badge))
                         .rounded_full()
                         .bg(rgb(0xFFFFFF))
-                        .shadow(vec![BoxShadow { color: alpha(pal().grape.edge, 0.6), offset: point(px(0.), px(badge * 0.06)), blur_radius: px(0.), spread_radius: px(0.) }])
+                        .shadow(vec![BoxShadow { color: alpha(pal().grape.edge, 0.6), offset: point(px(0.), px(badge * 0.06)), blur_radius: px(0.), spread_radius: px(0.), inset: false }])
                         .flex()
                         .items_center()
                         .justify_center()

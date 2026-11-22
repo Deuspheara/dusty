@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use gpui::{
     canvas, div, point, px, Bounds, Context, Corners, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement, Pixels, Point, Render, RenderImage, Styled, Window,
+    App, ParentElement, Pixels, Point, PowerMode, Render, RenderImage, Styled, Subscription, ThermalState, WeakEntity, Window,
 };
 use raster::*;
 use rig::{p, Rig};
@@ -697,6 +697,8 @@ pub struct Dusty {
     bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     last_mouse: Option<Point<Pixels>>,
     last_compose: Option<Instant>,
+    /// time between composed frames, from the current frame budget
+    interval: std::time::Duration,
     wake_pending: bool,
     /// Metal renderer (None until first frame, or when unavailable / DUSTY_CPU=1)
     #[cfg(target_os = "macos")]
@@ -705,7 +707,7 @@ pub struct Dusty {
 
 impl Dusty {
     pub fn new(size: f32) -> Self {
-        Dusty { st: State::new(), size, canvas: Canvas::new(1, 1), frame: None, stale: vec![], last: Instant::now(), bounds: Rc::new(Cell::new(None)), last_mouse: None, last_compose: None, wake_pending: false, #[cfg(target_os = "macos")] gpu: None }
+        Dusty { st: State::new(), size, canvas: Canvas::new(1, 1), frame: None, stale: vec![], last: Instant::now(), bounds: Rc::new(Cell::new(None)), last_mouse: None, last_compose: None, interval: std::time::Duration::ZERO, wake_pending: false, #[cfg(target_os = "macos")] gpu: None }
     }
     pub fn set_size(&mut self, size: f32) {
         self.size = size;
@@ -722,6 +724,34 @@ impl Dusty {
         let b = self.bounds.get()?;
         let (fx, fy) = self.st.mouth_frac();
         Some(point(b.origin.x + b.size.width * fx, b.origin.y + b.size.height * fy))
+    }
+}
+
+/// Set while macOS reports a serious or critical thermal state (see `watch_thermal`).
+static THROTTLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Keep `THROTTLED` current; the returned subscription must live as long as the app.
+pub fn watch_thermal(cx: &mut App) -> Subscription {
+    fn update(cx: &mut App) {
+        let hot = matches!(cx.thermal_state(), ThermalState::Serious | ThermalState::Critical);
+        THROTTLED.store(hot, std::sync::atomic::Ordering::Relaxed);
+    }
+    update(cx);
+    cx.on_thermal_state_change(update)
+}
+
+/// Each vsync: redraw Dusty if his next frame is due, otherwise wait for the next vsync without drawing.
+fn on_vsync(this: WeakEntity<Dusty>, window: &mut Window, cx: &mut App) {
+    let Some(dusty) = this.upgrade() else { return };
+    let d = dusty.read(cx);
+    let due = d.last_compose.is_none_or(|t| t.elapsed() + std::time::Duration::from_millis(2) >= d.interval);
+    if due {
+        dusty.update(cx, |d, cx| {
+            d.wake_pending = false;
+            cx.notify();
+        });
+    } else {
+        window.on_next_frame(move |window, cx| on_vsync(this, window, cx));
     }
 }
 
@@ -746,11 +776,16 @@ impl Render for Dusty {
         // Composing costs ~1-5 ms on the CPU, so this keeps an idle window cheap.
         let active = window.is_window_active();
         let lively = self.st.lively();
-        let interval = std::time::Duration::from_secs_f32(match (active, lively) {
-            (true, true) => 1. / 60.,
-            (true, false) | (false, true) => 1. / 30.,
-            (false, false) => 1. / 12.,
-        });
+        let fps = match (active, lively) {
+            (true, true) => 60.,
+            (true, false) | (false, true) => 30.,
+            (false, false) => 12.,
+        };
+        // Low Power Mode or a hot Mac: Dusty is decoration, so he moves at half the rate
+        let saving = cx.power_mode() == PowerMode::LowPower || THROTTLED.load(std::sync::atomic::Ordering::Relaxed);
+        let fps: f32 = if saving { fps / 2. } else { fps };
+        let interval = std::time::Duration::from_secs_f32(1. / fps);
+        self.interval = interval;
         let side = (self.size * window.scale_factor()).round().max(8.) as usize;
         let due = self.last_compose.is_none_or(|t| now.duration_since(t) + std::time::Duration::from_millis(2) >= interval) || self.canvas.w != side;
         if let (Some(r), true) = (try_rig(), due) {
@@ -782,8 +817,12 @@ impl Render for Dusty {
                 }
             }
         }
-        if interval.as_secs_f32() <= 1. / 59. {
-            window.request_animation_frame();
+        if fps >= 59. && !self.wake_pending {
+            // vsync-aligned, but the window only redraws when Dusty has a new frame: on a 120 Hz display
+            // request_animation_frame would redraw everything twice per Dusty frame
+            self.wake_pending = true;
+            let this = cx.entity().downgrade();
+            window.on_next_frame(move |window, cx| on_vsync(this, window, cx));
         } else if !self.wake_pending {
             // sleep until the next frame is due instead of waking on every vsync
             self.wake_pending = true;
@@ -829,7 +868,7 @@ impl Render for Dusty {
                             let _ = window.drop_image(s);
                         }
                         if let Some(f) = frame {
-                            let _ = window.paint_image(b, Corners::default(), f, 0, false);
+                            let _ = window.paint_image(b, b, Corners::default(), f, 0, false);
                         }
                     },
                 )
